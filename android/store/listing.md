@@ -3,7 +3,7 @@
 ## en-US
 Name: Ronda: Live Quizzes & Polls
 
-Short: Live quizzes and polls for family, class or work. Free, no account, no limits.
+Short: Live quizzes and polls for family, class or work. No account, no limits.
 
 Full:
 Make a quiz or a poll, show it on a big screen or share your screen in a video call, and everyone answers on their phone with a 6-digit code or by scanning the QR code.
@@ -13,7 +13,7 @@ Make a quiz or a poll, show it on a big screen or share your screen in a video c
 • Words: everyone sends up to 3 words, shown as a word cloud.
 • Scale: everyone picks 1 to 5 and you see the average.
 
-Free, with no account, no ads and no player limit (up to 500 people in one room). Players don't need to install anything: they can join from any browser at quiz.jurisgames.com.
+No account, no ads and no player limit (up to 500 people in one room). Players don't need to install anything: they can join from any browser at quiz.jurisgames.com.
 
 What you make is saved only on your device. Share a whole quiz as a link, or download the results as a spreadsheet (CSV). The server deletes a game when the room is closed, or 6 hours after the last activity at most.
 
@@ -22,7 +22,7 @@ Open source: github.com/kleiders3010/ronda
 ## es-419
 Name: Ronda: trivias y encuestas
 
-Short: Trivias y encuestas en vivo para la familia, la clase o el trabajo. Gratis.
+Short: Trivias y encuestas en vivo para la familia, la clase o el trabajo. Sin cuenta.
 
 Full:
 Armá una trivia o una encuesta, mostrala en una pantalla grande o compartí la pantalla en una videollamada, y todos responden desde el celular con un código de 6 números o escaneando el código QR.
@@ -32,7 +32,7 @@ Armá una trivia o una encuesta, mostrala en una pantalla grande o compartí la 
 • Palabras: cada uno manda hasta 3 palabras y se ven como una nube de palabras.
 • Escala: cada uno elige del 1 al 5 y se ve el promedio.
 
-Gratis, sin cuenta, sin anuncios y sin límite de jugadores (hasta 500 personas por sala). Los jugadores no necesitan instalar nada: pueden entrar desde cualquier navegador en quiz.jurisgames.com.
+Sin cuenta, sin anuncios y sin límite de jugadores (hasta 500 personas por sala). Los jugadores no necesitan instalar nada: pueden entrar desde cualquier navegador en quiz.jurisgames.com.
 
 Lo que creás se guarda solo en tu dispositivo. Compartí una ronda entera como enlace o descargá los resultados como planilla (CSV). El servidor borra la partida cuando se cierra la sala o, como máximo, 6 horas después de la última actividad.
 
