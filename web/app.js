@@ -1,6 +1,7 @@
 // Ronda: make a quiz or poll, show it on a big screen, everyone answers on their phone.
 // Quizzes live on this device (localStorage) and travel as links or files. The server only runs live rooms.
 import { t, translatePage, LANG } from "/i18n.js";
+import { openFeedback } from "/feedback.js";
 
 const $ = (s) => document.querySelector(s);
 const el = (tag, cls, text) => {
@@ -22,6 +23,19 @@ function toast(text, ms = 3200) {
 
 function safeGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 function safeSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
+
+// "Send feedback" (home page and the big screen): what the person writes, plus, if they keep the tick, the page
+// they are on and how often the live link dropped. Never quiz content or names.
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".fbOpen")) return;
+  e.preventDefault();
+  openFeedback({
+    app: "ronda",
+    t,
+    toast,
+    details: () => ({ page: document.querySelector(".page:not([hidden])")?.id || "", path: location.pathname.replace(/\/[a-z0-9]{4,}$/i, "/…"), live: { ...LIVE } }),
+  });
+});
 
 // ---------------- pages ----------------
 function show(id) {
@@ -365,14 +379,15 @@ async function startHosting(q) {
 }
 
 // ---------------- live connection (auto-reconnects) ----------------
+const LIVE = { opens: 0, drops: 0 }; // for "Send feedback": how often the live link dropped
 function connect(code, onOpen, onMsg) {
   let ws, stopped = false, wait = 500;
   const base = new URLSearchParams(location.search).get("server") || location.origin.replace(/^http/, "ws");
   const open = () => {
     ws = new WebSocket(base + "/ws/" + code);
-    ws.onopen = () => { wait = 500; onOpen(); };
+    ws.onopen = () => { wait = 500; LIVE.opens++; onOpen(); };
     ws.onmessage = (e) => { try { onMsg(JSON.parse(e.data)); } catch {} };
-    ws.onclose = () => { if (!stopped) { setTimeout(open, wait); wait = Math.min(wait * 2, 8000); } };
+    ws.onclose = () => { if (!stopped) { LIVE.drops++; setTimeout(open, wait); wait = Math.min(wait * 2, 8000); } };
   };
   open();
   return {

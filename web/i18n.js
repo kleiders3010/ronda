@@ -1,8 +1,14 @@
 // UI language: the browser's, or ?lang=xx in the link. English text is the key; other languages map it.
 // Add a language: copy the "es" block, translate the right-hand side.
 
+import { FEEDBACK_ES } from "/feedback.js";
+
 const DICT = {
   es: { // Spanish as spoken in Argentina (vos)
+    ...FEEDBACK_ES,
+    "Report a problem or idea": "Contar un problema o una idea",
+    "Feedback": "Comentarios",
+    "Include technical details": "Incluir detalles técnicos",
     "Ronda · free live quizzes and polls": "Ronda · preguntas y encuestas en vivo, gratis",
     "Enter the code from the screen": "Escribí el código de la pantalla",
     "Join": "Entrar",
