@@ -1,0 +1,10 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "com.jurisgames.ronda",
+    "sha256_cert_fingerprints": [
+      "4A:19:CB:BD:84:52:15:58:62:98:30:64:F8:B6:9F:53:1E:CB:D4:1B:BB:D7:4A:64:FB:40:D5:C6:E2:1A:82:81"
+    ]
+  }
+}]
