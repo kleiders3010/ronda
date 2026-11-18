@@ -1,0 +1,22 @@
+# Ronda: the web app (static files) and its live rooms (one Durable Object per room code), one Worker.
+# Free plan: SQLite-backed Durable Objects, static assets.
+name = "ronda"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+workers_dev = false
+routes = [
+  { pattern = "quiz.jurisgames.com", custom_domain = true },
+]
+
+[assets]
+directory = "../web"
+not_found_handling = "single-page-application"
+run_worker_first = ["/ws/*", "/api/*", "/health"]
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]

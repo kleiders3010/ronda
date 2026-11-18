@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14112b">
+<title>Ronda · free live quizzes and polls</title>
+<meta name="description" content="Free live quizzes and polls. Everyone joins on their phone with a code. No account, no player limit. Open source.">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/img/icon-192.png">
+<link rel="apple-touch-icon" href="/img/icon-192.png">
+<link rel="stylesheet" href="/style.css">
+<script src="/vendor/qrcode.js" defer></script>
+</head>
+<body>
+
+<!-- Home: join first, then make -->
+<section id="home" class="page light">
+  <div class="col">
+    <div class="brand"><img src="/img/icon-192.png" alt="" class="logo"><h1>Ronda</h1></div>
+    <form id="codeForm" class="card">
+      <label for="code" class="big-label">Enter the code from the screen</label>
+      <input id="code" class="code-input" inputmode="numeric" autocomplete="off" maxlength="7" placeholder="123 456">
+      <button class="btn primary wide">Join</button>
+      <p id="codeMsg" class="msg" hidden></p>
+    </form>
+    <button id="makeBtn" class="btn ghost wide">Make a quiz or poll</button>
+    <div id="mineWrap" hidden>
+      <h2 class="sub">Your rondas</h2>
+      <ul id="mine" class="mine"></ul>
+    </div>
+    <p class="small foot">Free, no account, no player limit · Open source · <a href="https://github.com/kleiders3010/ronda">GitHub</a> · <a href="/privacy">Privacy</a></p>
+  </div>
+</section>
+
+<!-- Player: name, then the game -->
+<section id="name" class="page light" hidden>
+  <form id="nameForm" class="col center">
+    <p class="small">Code <b id="nameCode"></b></p>
+    <label for="nameInput" class="big-label">Your name</label>
+    <input id="nameInput" maxlength="30" autocomplete="nickname" placeholder="Your name">
+    <button class="btn primary wide">Go</button>
+    <button type="button" class="btn link" data-home>Back</button>
+  </form>
+</section>
+
+<section id="play" class="page player" hidden>
+  <header class="pbar"><span id="pName" class="pname"></span><span id="pScore" class="pscore"></span></header>
+  <main id="pMain" class="pmain"></main>
+</section>
+
+<!-- Editor -->
+<section id="edit" class="page light" hidden>
+  <header class="ebar">
+    <button class="btn link" data-home>‹ Rondas</button>
+    <span id="saved" class="small">Saved</span>
+  </header>
+  <div class="col wide-col">
+    <input id="title" class="title-input" maxlength="120" placeholder="Title">
+    <ol id="qs" class="qs"></ol>
+    <div class="add">
+      <span class="small">Add</span>
+      <button class="btn chip" data-add="quiz">Quiz</button>
+      <button class="btn chip" data-add="poll">Poll</button>
+      <button class="btn chip" data-add="words">Words</button>
+      <button class="btn chip" data-add="scale">Scale</button>
+    </div>
+    <p id="editMsg" class="msg" hidden></p>
+  </div>
+  <footer class="efoot">
+    <button id="shareBtn" class="btn ghost">Share</button>
+    <button id="delBtn" class="btn ghost danger-text">Delete</button>
+    <button id="startBtn" class="btn primary big">Start</button>
+  </footer>
+</section>
+
+<!-- Host screen (big screen) -->
+<section id="host" class="page dark" hidden>
+  <main id="hMain" class="hmain"></main>
+  <footer class="hfoot">
+    <span id="hInfo" class="small"></span>
+    <span class="grow"></span>
+    <button id="hFull" class="btn chip dim">Full screen</button>
+    <button id="hNext" class="btn primary big">Start</button>
+  </footer>
+</section>
+
+<div id="toasts" class="toasts"></div>
+<input id="importFile" type="file" accept=".json,application/json" hidden>
+<script type="module" src="/app.js"></script>
+</body>
+</html>
