@@ -3,7 +3,7 @@
 Make a quiz or a poll, show it on a big screen (or share your screen in a video call), and everyone answers on
 their phone with a short code. No account, no player limit, nothing to install, open source. English and Spanish.
 
-**Use it:** https://quiz.jurisgames.com · [Privacy](https://quiz.jurisgames.com/privacy)
+**Use it:** https://quiz.jurisgames.com · **Android app:** [Google Play](https://play.google.com/store/apps/details?id=com.jurisgames.ronda) · [Privacy](https://quiz.jurisgames.com/privacy)
 
 - **Quiz**: questions with a right answer; faster right answers get more points; ranking after each question
   and a podium at the end.
