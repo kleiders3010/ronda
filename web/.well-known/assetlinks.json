@@ -4,7 +4,8 @@
     "namespace": "android_app",
     "package_name": "com.jurisgames.ronda",
     "sha256_cert_fingerprints": [
-      "4A:19:CB:BD:84:52:15:58:62:98:30:64:F8:B6:9F:53:1E:CB:D4:1B:BB:D7:4A:64:FB:40:D5:C6:E2:1A:82:81"
+      "4A:19:CB:BD:84:52:15:58:62:98:30:64:F8:B6:9F:53:1E:CB:D4:1B:BB:D7:4A:64:FB:40:D5:C6:E2:1A:82:81",
+      "A1:44:9F:0B:17:8B:83:45:4D:C3:18:4F:22:67:4A:F8:FF:CA:8C:1C:F6:73:F2:C1:6F:0A:F6:0C:B9:1E:CD:52"
     ]
   }
 }]
