@@ -5,7 +5,7 @@ their phone with a short code. No account, no player limit, nothing to install, 
 
 **Use it:** https://quiz.jurisgames.com · **Android app:** [Google Play](https://play.google.com/store/apps/details?id=com.jurisgames.ronda) · [Privacy](https://quiz.jurisgames.com/privacy)
 
-- **Quiz**: questions with a right answer (2 to 6 answers); faster right answers get more points; ranking after each question
+- **Quiz**: questions with a right answer (2 to 6 answers); faster right answers get more points (each question standard, double or no points, like Kahoot); ranking after each question; phones show an answer streak (right answers in a row, no extra points)
   and a podium at the end.
 - **Poll**: people vote, the bars fill live.
 - **Words**: everyone sends up to 3 words, shown as a word cloud.

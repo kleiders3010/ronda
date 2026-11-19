@@ -286,6 +286,7 @@ function renderQuestions() {
       if (q.img) n.img = q.img;
       if (q.answers && n.answers) n.answers = q.answers;
       if (q.aimg && (n.kind === "quiz" || n.kind === "poll")) n.aimg = q.aimg;
+      if (q.pts != null && scored(n.kind)) n.pts = q.pts;
       editing.questions[i] = n;
       touch();
       renderQuestions();
@@ -387,8 +388,34 @@ function renderQuestions() {
       li.append(el("p", "small hint", q.kind === "words" ? t("Everyone can send up to 3 words. They show as a word cloud.")
         : t("Everyone picks 1 to 5. Shows the average.")));
     }
+    if (scored(q.kind)) li.append(pointsPicker(q));
     ol.append(li);
   });
+}
+
+// Kahoot's "Points" (help 'How points work'): standard (up to 1000), double (up to 2000) or none
+const PTS_NAME = { 1: "Standard points", 2: "Double points", 0: "No points" };
+function pointsPicker(q) {
+  const row = el("label", "qpts");
+  const sel = el("select", "pts");
+  for (const v of [1, 2, 0]) {
+    const o = el("option", "", t(PTS_NAME[v]));
+    o.value = v;
+    sel.append(o);
+  }
+  sel.value = q.pts ?? 1;
+  sel.onchange = () => {
+    const v = Number(sel.value);
+    if (v === 1) delete q.pts;
+    else q.pts = v;
+    touch();
+  };
+  row.append(el("span", "small", t("Points")), sel);
+  return row;
+}
+// "Double points" / "No points" on the screens while the question is up; nothing for standard
+function ptsTag(pts) {
+  return pts === 2 || pts === 0 ? el("span", "ptsTag" + (pts === 2 ? " x2" : ""), t(PTS_NAME[pts])) : null;
 }
 
 function problems(q) {
@@ -779,7 +806,10 @@ function playerView(m) {
     out.push(homeLink());
     return out;
   }
-  out.push(el("p", "progress", t("Question {i} of {n}", { i: m.qi + 1, n: m.n })));
+  const prog = el("p", "progress", t("Question {i} of {n}", { i: m.qi + 1, n: m.n }));
+  const tag = scored(m.kind) ? ptsTag(m.pts) : null;
+  if (tag) prog.append(" ", tag);
+  out.push(prog);
   out.push(el("h2", "ptext", m.text));
   if (m.phase === "question") {
     if (m.endsIn) {
@@ -857,7 +887,11 @@ function playerView(m) {
   // reveal / board
   if (scored(m.kind)) {
     if (m.mine == null) out.push(el("p", "big-no", t("No answer this time")));
-    else if (m.right) out.push(el("p", "big-ok", t("Right!")), el("p", "gain", "+" + m.gained));
+    else if (m.right) {
+      out.push(el("p", "big-ok", t("Right!")));
+      if (m.pts !== 0) out.push(el("p", "gain", "+" + m.gained));
+    }
+    if (m.streak >= 2) out.push(el("p", "streak", "🔥 " + t("Answer streak {n}", { n: m.streak })));
     else out.push(el("p", "big-no", t("Not this time")));
     if (m.kind === "quiz" && m.answers && !m.right) {
       if (m.mine != null) out.push(el("p", "said", t("You said {a}", { a: withLetter(m.answers, m.mine) })));
@@ -1189,7 +1223,10 @@ function renderHost(code, m, fresh) {
   if (fresh) {
     const wrap = el("div", "qHost");
     const top = el("div", "qtop");
-    top.append(el("span", "progress", t("Question {i} of {n}", { i: m.qi + 1, n: qs.length })), el("span", "answered"));
+    const prog = el("span", "progress", t("Question {i} of {n}", { i: m.qi + 1, n: qs.length }));
+    const tag = scored(q.kind) ? ptsTag(q.pts ?? 1) : null;
+    if (tag) prog.append(" ", tag);
+    top.append(prog, el("span", "answered"));
     wrap.append(top, el("h1", "htext", q.text));
     const qpic = hostUrls.get(hostPics[m.qi]?.q);
     if (qpic) {

@@ -106,6 +106,11 @@ a { color: var(--accent); }
 .big-ok { font-size: 42px; font-weight: 800; margin: 0; color: #86efac; }
 .big-no { font-size: 36px; font-weight: 800; margin: 0; color: #fda4af; }
 .gain { font-size: 28px; font-weight: 800; margin: 0; }
+.streak { font-size: 18px; font-weight: 700; margin: 6px 0 0; }
+.qpts { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.qpts select { width: auto; padding: 6px 10px; font-weight: 600; }
+.ptsTag { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; font-size: 0.85em; font-weight: 700; background: #3a3560; color: #e6e2ff; }
+.ptsTag.x2 { background: #ffd23f; color: #1b1638; }
 .place { font-size: 22px; font-weight: 700; margin: 8px 0 0; }
 .said { margin: 4px 0 0; opacity: .85; }
 .progress { margin: 0; color: #a59fc9; font-weight: 600; font-size: 15px; }

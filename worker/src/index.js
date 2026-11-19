@@ -114,6 +114,8 @@ export function cleanSnap(s, host) {
     const id = String(p?.id || "");
     if (!/^[A-Za-z0-9_-]{8,40}$/.test(id) || players[id]) continue;
     players[id] = { name: str(p.name, 30) || "Player", score: Math.max(0, Math.min(1e7, Math.trunc(Number(p.score)) || 0)) };
+    const streak = Math.max(0, Math.min(1000, Math.trunc(Number(p.streak)) || 0));
+    if (streak) players[id].streak = streak;
     if (p.out) players[id].out = true;
   }
   const log = [];
@@ -183,6 +185,8 @@ export function cleanQuiz(q) {
     const t = Number(x?.time);
     out.time = [0, 10, 20, 30, 60, 90, 120].includes(t) ? t : scored(out.kind) ? 20 : 0;
     if (scored(out.kind) && !out.time) out.time = 20;
+    // Kahoot's "Points": standard (left out), double or none, per question with a right answer
+    if (scored(out.kind) && (x.pts === 2 || x.pts === 0)) out.pts = x.pts;
     questions.push(out);
   }
   if (!questions.length) return null;
@@ -192,7 +196,7 @@ export function cleanQuiz(q) {
 export function points(q, elapsedMs) {
   const limit = (q.time || 20) * 1000;
   const f = Math.min(1, Math.max(0, elapsedMs / limit));
-  return Math.round(1000 * (1 - f / 2));
+  return Math.round(1000 * (q.pts ?? 1) * (1 - f / 2));
 }
 
 export class Room {
@@ -408,6 +412,14 @@ export class Room {
           if (g.players[id]) g.players[id].score += pts;
         }
       }
+      // answer streak (shown, like Kahoot's, no extra points): right answers in a row; a question worth
+      // no points neither adds to it nor breaks it
+      if (q.pts !== 0) {
+        for (const [id, p] of Object.entries(g.players)) {
+          if (g.ans[id] && isRight(q, g.ans[id].v)) p.streak = (p.streak || 0) + 1;
+          else delete p.streak;
+        }
+      }
     }
     g.log[g.qi] = Object.fromEntries(Object.entries(g.ans).map(([id, a]) => [id, a.v]));
     await this.save(true);
@@ -565,7 +577,7 @@ export class Room {
   ranking() {
     return Object.entries(this.g.players)
       .filter(([, p]) => !p.out)
-      .map(([id, p]) => ({ id, name: p.name, score: p.score }))
+      .map(([id, p]) => ({ id, name: p.name, score: p.score, ...(p.streak ? { streak: p.streak } : {}) }))
       .sort((a, b) => b.score - a.score);
   }
 
@@ -609,13 +621,13 @@ export class Room {
     const n = g.quiz.questions.length;
     const mine = g.ans[id]?.v ?? null;
     if (g.phase === "question") {
-      return { ...base, qi: g.qi, n, kind: q.kind, text: q.text, answers: q.answers || null, mine,
+      return { ...base, qi: g.qi, n, kind: q.kind, pts: q.pts ?? 1, text: q.text, answers: q.answers || null, mine,
         shuf: q.kind === "order" ? g.shuf : null,
         endsIn: g.endsAt ? g.endsAt - Date.now() : 0, readIn: Math.max(0, g.startedAt + 1500 - Date.now()) };
     }
     const rank = this.ranking().findIndex((r) => r.id === id) + 1;
     if (g.phase === "end") return { ...base, rank, of: this.ranking().length, quizzy: g.quiz.questions.some((x) => scored(x.kind)) };
-    return { ...base, qi: g.qi, n, kind: q.kind, text: q.text, answers: q.answers || null, mine,
+    return { ...base, qi: g.qi, n, kind: q.kind, pts: q.pts ?? 1, streak: p.streak || 0, text: q.text, answers: q.answers || null, mine,
       correct: q.kind === "quiz" ? q.correct : q.kind === "type" ? q.accept : null,
       right: scored(q.kind) && mine != null ? isRight(q, mine) : null, gained: g.gained?.[id] || 0, rank };
   }
