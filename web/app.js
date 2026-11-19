@@ -2,6 +2,7 @@
 // Quizzes live on this device (localStorage) and travel as links or files. The server only runs live rooms.
 import { t, translatePage, LANG } from "./i18n.js";
 import { openFeedback } from "./feedback.js";
+import { putPic, getPic, keepOnly, shrink, isPic } from "./pics.js";
 // the folder the app lives in: "/" on quiz.jurisgames.com, "/ronda/" on the copy at GitHub Pages
 const BASE = new URL(".", import.meta.url).pathname;
 const here = () => "/" + location.pathname.slice(BASE.length); // the app's own path ("/host/123456")
@@ -105,7 +106,7 @@ function blankQuiz() {
 
 // share links carry the whole quiz, compressed, after the # (never sent to the server)
 async function packQuiz(q) {
-  const json = JSON.stringify({ title: q.title, questions: q.questions });
+  const json = JSON.stringify({ title: q.title, questions: bare(q.questions) });
   let bytes = new TextEncoder().encode(json), tag = "j";
   if (window.CompressionStream) {
     bytes = new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream("deflate-raw"))).arrayBuffer());
@@ -122,15 +123,34 @@ async function unpackQuiz(s) {
   if (tag === "z") bytes = new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer());
   return JSON.parse(new TextDecoder().decode(bytes));
 }
-function adopt(data) {
+// questions without their pictures: what links and the server get (pictures stay on this device, pics.js)
+const bare = (qs) => qs.map(({ img, ...x }) => x);
+async function adopt(data) {
   if (!data || !Array.isArray(data.questions)) throw new Error("not a ronda");
   const q = { id: randId(10), title: String(data.title || "").slice(0, 120), questions: data.questions.slice(0, 100) };
+  for (const x of q.questions) {
+    const img = x?.img;
+    if (x) delete x.img;
+    if (typeof img === "string" && /^data:image\/(webp|jpeg|png|gif);base64,/.test(img) && img.length < 4e6) {
+      try { x.img = await putPic(img); } catch {}
+    }
+  }
   putQuiz(q);
   return q;
 }
+// a file carries the pictures themselves
+async function quizFile(q) {
+  const questions = [];
+  for (const x of q.questions) {
+    const pic = await getPic(x.img);
+    const { img, ...rest } = x;
+    questions.push(pic ? { ...rest, img: pic } : rest);
+  }
+  return JSON.stringify({ title: q.title, questions }, null, 1);
+}
 async function importLink(s) {
   try {
-    const q = adopt(await unpackQuiz(s));
+    const q = await adopt(await unpackQuiz(s));
     toast(t("Saved to your rondas"));
     go("/edit/" + q.id, true);
   } catch {
@@ -143,7 +163,7 @@ $("#importFile").addEventListener("change", async (e) => {
   e.target.value = "";
   if (!f) return;
   try {
-    const q = adopt(JSON.parse(await f.text()));
+    const q = await adopt(JSON.parse(await f.text()));
     go("/edit/" + q.id);
   } catch {
     toast(t("That file isn't a ronda"));
@@ -174,6 +194,7 @@ function homeScreen() {
   fileRow.append(fb);
   ul.append(fileRow);
   $("#code").value = "";
+  keepOnly(new Set(list.flatMap((q) => q.questions.map((x) => x.img)).filter(isPic)));
 }
 $("#code").addEventListener("input", (e) => {
   const d = e.target.value.replace(/\D/g, "").slice(0, 6);
@@ -245,6 +266,7 @@ function renderQuestions() {
     kind.onchange = () => {
       const n = newQuestion(kind.value);
       n.text = q.text;
+      if (q.img) n.img = q.img;
       if (q.answers && n.answers) n.answers = q.answers;
       editing.questions[i] = n;
       touch();
@@ -288,7 +310,7 @@ function renderQuestions() {
       type: t("Ask a question people answer by typing"), order: t("Ask people to put things in order") }[q.kind];
     text.value = q.text;
     text.oninput = () => { q.text = text.value; touch(); };
-    li.append(head, text);
+    li.append(head, text, picEdit(q, li));
     if (q.kind === "type") {
       const grid = el("div", "answersEdit");
       q.accept.forEach((a, j) => {
@@ -381,17 +403,62 @@ $("#delBtn").onclick = () => {
 $("#shareBtn").onclick = async () => {
   putQuiz(editing);
   const url = location.origin + BASE + "#r=" + (await packQuiz(editing));
+  const pics = editing.questions.some((x) => x.img);
   const title = editing.title || "Ronda";
   if (navigator.share) {
     try { await navigator.share({ title, text: t("A ronda to use or copy: {title}", { title }), url }); return; } catch (e) { if (e.name === "AbortError") return; }
   }
   try {
     await navigator.clipboard.writeText(url);
-    toast(t("Link copied. Anyone who opens it gets their own copy."));
+    toast(pics ? t("Link copied, without the pictures. To pass them on too, use Save as file.") : t("Link copied. Anyone who opens it gets their own copy."), pics ? 6000 : 3200);
   } catch {
-    downloadFile((title || "ronda") + ".json", JSON.stringify({ title: editing.title, questions: editing.questions }, null, 1), "application/json");
+    downloadFile((title || "ronda") + ".json", await quizFile(editing), "application/json");
   }
 };
+$("#fileBtn").onclick = async () => {
+  putQuiz(editing);
+  downloadFile((editing.title || "ronda") + ".json", await quizFile(editing), "application/json");
+};
+
+// the question's picture (like Kahoot's): add (button, drop or paste), see, change, remove
+function picEdit(q, card) {
+  const box = el("div", "picEdit");
+  const set = async (file) => {
+    const url = await shrink(file);
+    if (!url) return toast(t("That isn't a picture"));
+    try { q.img = await putPic(url); } catch { return toast(t("This device has no room for more pictures")); }
+    touch();
+    renderQuestions();
+  };
+  const input = el("input");
+  input.type = "file";
+  input.accept = "image/*";
+  input.hidden = true;
+  input.name = "picFile";
+  input.onchange = () => { const f = input.files[0]; input.value = ""; if (f) set(f); };
+  card.ondragover = (e) => { if ([...e.dataTransfer.items].some((i) => i.kind === "file")) { e.preventDefault(); card.classList.add("drop"); } };
+  card.ondragleave = () => card.classList.remove("drop");
+  card.ondrop = (e) => { const f = e.dataTransfer.files[0]; card.classList.remove("drop"); if (f) { e.preventDefault(); set(f); } };
+  card.onpaste = (e) => { const f = [...e.clipboardData.files].find((x) => /^image\//.test(x.type)); if (f) { e.preventDefault(); set(f); } };
+  if (q.img) {
+    const img = el("img", "picThumb");
+    img.alt = t("Picture");
+    getPic(q.img).then((u) => { if (u) img.src = u; else img.replaceWith(el("span", "small hint", t("The picture isn't on this device"))); });
+    const change = el("button", "btn chip", t("Change"));
+    change.onclick = () => input.click();
+    const drop = el("button", "btn chip", t("Remove picture"));
+    drop.name = "dropPic";
+    drop.onclick = () => { delete q.img; touch(); renderQuestions(); };
+    box.append(img, change, drop, input);
+  } else {
+    const add = el("button", "btn chip addPic", t("+ Picture"));
+    add.name = "addPic";
+    add.title = t("Shown on the big screen. You can also drop or paste one here.");
+    add.onclick = () => input.click();
+    box.append(add, input);
+  }
+  return box;
+}
 
 function downloadFile(name, text, type) {
   const a = document.createElement("a");
@@ -417,7 +484,7 @@ async function startHosting(q) {
       const r = await fetch(SERVERS[at].replace(/^ws/, "http") + "/api/new", { method: "POST", signal: ctl.signal });
       if (!r.ok) throw new Error(r.status);
       const { code, token } = await r.json();
-      sessionStorage.setItem("host:" + code, JSON.stringify({ token, at, quiz: { title: q.title, questions: q.questions } }));
+      sessionStorage.setItem("host:" + code, JSON.stringify({ token, at, quiz: { title: q.title, questions: bare(q.questions) }, pics: q.questions.map((x) => x.img || null) }));
       return go("/host/" + code);
     } catch {
     } finally {
@@ -815,6 +882,7 @@ function hostScreen(code) {
   if (!saved) { toast(t("This screen isn't hosting that ronda")); return go("/", true); }
   show("host");
   keepAwake();
+  hostPics = saved.pics || [];
   const main = $("#hMain");
   main.replaceChildren(el("p", "wait", t("Opening the room…")));
   let st = null;
@@ -973,6 +1041,7 @@ function qr(text) {
   return c;
 }
 
+let hostPics = [];
 function renderHost(code, m, fresh) {
   const main = $("#hMain");
   const qs = m.quiz.questions;
@@ -1057,6 +1126,12 @@ function renderHost(code, m, fresh) {
     const top = el("div", "qtop");
     top.append(el("span", "progress", t("Question {i} of {n}", { i: m.qi + 1, n: qs.length })), el("span", "answered"));
     wrap.append(top, el("h1", "htext", q.text));
+    if (hostPics[m.qi]) {
+      const img = el("img", "qimg");
+      img.alt = "";
+      wrap.append(img);
+      getPic(hostPics[m.qi]).then((u) => { if (u) img.src = u; else img.remove(); });
+    }
     if (asking && m.endsIn) {
       const tb = timerBar();
       wrap.append(tb);

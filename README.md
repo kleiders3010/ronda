@@ -18,6 +18,9 @@ their phone with a short code. No account, no player limit, nothing to install, 
   their name or anonymously, and upvote each other's questions (popular or recent first). The host shows one on the
   big screen, marks it answered or deletes it, can approve each question before anyone sees it, can close questions,
   and can save them as a spreadsheet. `python worker/qa_test.py`.
+- **Pictures** on questions (like Kahoot's): add one from a file, or drop or paste it on the question. It is shrunk
+  on the device and kept there (IndexedDB), shown on the big screen above the answers and never sent to the server
+  or to phones; a share link goes without pictures, "Save as file" carries them. `python worker/picture_test.py`.
 - Download the results as a spreadsheet (CSV). Share a ronda as a link: the whole quiz travels inside the link.
 - Send feedback (start page and the big screen): a problem or an idea, an optional email for an answer and, if you keep the tick, technical details (browser, page, errors; never quiz content or names). "See what's sent" shows it all first. Emailed to hello@jurisgames.com through [jurisgames-feedback](https://github.com/kleiders3010/jurisgames-feedback), which stores nothing.
 

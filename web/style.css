@@ -67,7 +67,9 @@ a { color: var(--accent); }
 .qcard { background: var(--card); border-radius: var(--radius); padding: 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 2px 10px rgba(40, 20, 90, .07); }
 .qhead { display: flex; gap: 8px; align-items: center; }
 .qnum { width: 30px; height: 30px; border-radius: 50%; background: var(--night); color: #fff; display: grid; place-items: center; font-weight: 700; flex: none; font-size: 15px; }
-.qhead select { width: auto; padding: 7px 10px; font-weight: 600; }
+.qhead select { width: auto; padding: 7px 10px; font-weight: 600; min-width: 0; }
+.qhead select.kind { flex: 0 1 auto; }
+.qhead select.time { flex: none; }
 .qtools { margin-left: auto; display: flex; }
 .qtext { font-size: 19px; font-weight: 600; }
 .answersEdit { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -81,7 +83,14 @@ a { color: var(--accent); }
 .efoot { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 10px; justify-content: flex-end; align-items: center; padding: 12px 16px; padding-bottom: max(12px, env(safe-area-inset-bottom)); background: rgba(246, 244, 255, .95); border-top: 1px solid var(--line); }
 @media (max-width: 560px) {
   .answersEdit { grid-template-columns: 1fr; }
-  .efoot .btn.big { flex: 1; }
+  .efoot { flex-wrap: wrap; gap: 8px; }
+  .wide-col { padding-bottom: 170px; }
+  .efoot { padding-left: 10px; padding-right: 10px; }
+  .efoot .btn.ghost { flex: 1 1 auto; padding: 9px 6px; font-size: 15px; white-space: nowrap; }
+  .qhead { gap: 6px; }
+  .qhead select { padding: 7px 6px; }
+  .qtools .icon { width: 30px; }
+  .efoot .btn.big { flex: 1 0 100%; }
 }
 
 .c0 { --c: var(--c0); } .c1 { --c: var(--c1); } .c2 { --c: var(--c2); } .c3 { --c: var(--c3); } .c4 { --c: var(--c4); } .c5 { --c: var(--c5); }
@@ -258,3 +267,10 @@ div.typed .chip.ok { outline: 2px solid #86efac; }
 .pAnswers.order .pa .letter:empty, .hAnswers.order .ha .letter:empty { visibility: hidden; }
 .res > .avg { text-align: center; font-size: clamp(22px, 3vw, 40px); margin-bottom: 8px; }
 .typeRes .small { font-size: clamp(16px, 1.6vw, 24px); color: #d6d1f0; margin: 0; }
+
+/* question pictures: editor and big screen */
+.picEdit { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.picThumb { max-height: 120px; max-width: 100%; border-radius: 10px; object-fit: contain; background: #0001; }
+.qcard.drop { outline: 3px dashed var(--accent, #6d28d9); outline-offset: 2px; }
+.qimg { flex: 1 1 0; min-height: 0; max-height: 42vh; width: 100%; object-fit: contain; }
+.qHost:has(.qimg) .res { flex: 0 0 auto; }
