@@ -14,7 +14,16 @@ const el = (tag, cls, text) => {
   return e;
 };
 const LETTERS = ["A", "B", "C", "D"];
-const KIND_NAME = { quiz: "Quiz", poll: "Poll", words: "Words", scale: "Scale" };
+const KIND_NAME = { quiz: "Quiz", poll: "Poll", words: "Words", scale: "Scale", type: "Type answer", order: "Put in order" };
+// kinds with a right answer (points, ranking); the same rules as the server's (worker/src/index.js)
+const scored = (k) => k === "quiz" || k === "type" || k === "order";
+const norm = (s) => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+function isRight(q, v) {
+  if (q.kind === "quiz") return q.correct.includes(v);
+  if (q.kind === "type") return typeof v === "string" && !!norm(v) && q.accept.some((a) => norm(a) === norm(v));
+  if (q.kind === "order") return Array.isArray(v) && v.length === q.answers.length && v.every((x, i) => x === i);
+  return false;
+}
 const fmtCode = (c) => c.slice(0, 3) + " " + c.slice(3);
 const randId = (n = 16) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => "abcdefghijkmnpqrstuvwxyz23456789"[b % 32]).join("");
 
@@ -83,8 +92,9 @@ function putQuiz(q) {
   saveQuizzes(list);
 }
 function newQuestion(kind) {
-  const q = { kind, text: "", time: kind === "quiz" ? 20 : 0 };
-  if (kind === "quiz" || kind === "poll") q.answers = ["", "", "", ""];
+  const q = { kind, text: "", time: scored(kind) ? 20 : 0 };
+  if (kind === "quiz" || kind === "poll" || kind === "order") q.answers = ["", "", "", ""];
+  if (kind === "type") q.accept = ["", "", "", ""];
   if (kind === "quiz") q.correct = [0];
   return q;
 }
@@ -214,7 +224,7 @@ for (const b of document.querySelectorAll("[data-add]")) {
 }
 
 function timeOptions(kind) {
-  return kind === "quiz" ? [10, 20, 30, 60, 90, 120] : [0, 20, 30, 60, 90, 120];
+  return scored(kind) ? [10, 20, 30, 60, 90, 120] : [0, 20, 30, 60, 90, 120];
 }
 
 function renderQuestions() {
@@ -273,18 +283,34 @@ function renderQuestions() {
     text.rows = 2;
     text.maxLength = 300;
     text.placeholder = { quiz: t("Ask a question with a right answer"), poll: t("Ask what people think"),
-      words: t("Ask for a word or two"), scale: t("Ask for a rating from 1 to 5") }[q.kind];
+      words: t("Ask for a word or two"), scale: t("Ask for a rating from 1 to 5"),
+      type: t("Ask a question people answer by typing"), order: t("Ask people to put things in order") }[q.kind];
     text.value = q.text;
     text.oninput = () => { q.text = text.value; touch(); };
     li.append(head, text);
-    if (q.answers) {
+    if (q.kind === "type") {
+      const grid = el("div", "answersEdit");
+      q.accept.forEach((a, j) => {
+        const row = el("div", "aedit c" + j);
+        const inp = el("input");
+        inp.maxLength = 60;
+        inp.name = "accept";
+        inp.placeholder = j ? t("Also accepted (optional)") : t("The right answer");
+        inp.value = a;
+        inp.oninput = () => { q.accept[j] = inp.value; touch(); };
+        row.append(inp);
+        grid.append(row);
+      });
+      li.append(grid, el("p", "small hint", t("Capitals, accents and spaces don't matter. Add other spellings that also count.")));
+    } else if (q.answers) {
       const grid = el("div", "answersEdit");
       q.answers.forEach((a, j) => {
         const row = el("div", "aedit c" + j);
-        row.append(el("span", "letter", LETTERS[j]));
+        row.append(el("span", "letter", q.kind === "order" ? String(j + 1) : LETTERS[j]));
         const inp = el("input");
         inp.maxLength = 120;
-        inp.placeholder = j < 2 ? t("Answer {l}", { l: LETTERS[j] }) : t("Answer {l} (optional)", { l: LETTERS[j] });
+        inp.placeholder = q.kind === "order" ? (j < 2 ? t("Number {n} in the order", { n: j + 1 }) : t("Number {n} (optional)", { n: j + 1 }))
+          : j < 2 ? t("Answer {l}", { l: LETTERS[j] }) : t("Answer {l} (optional)", { l: LETTERS[j] });
         inp.value = a;
         inp.oninput = () => { q.answers[j] = inp.value; touch(); };
         row.append(inp);
@@ -303,6 +329,7 @@ function renderQuestions() {
       });
       li.append(grid);
       if (q.kind === "quiz") li.append(el("p", "small hint", t("Tap ✓ on the right answer. Faster right answers get more points.")));
+      if (q.kind === "order") li.append(el("p", "small hint", t("Write them in the right order. Everyone sees them mixed up and puts them back.")));
     } else {
       li.append(el("p", "small hint", q.kind === "words" ? t("Everyone can send up to 3 words. They show as a word cloud.")
         : t("Everyone picks 1 to 5. Shows the average.")));
@@ -316,6 +343,7 @@ function problems(q) {
   for (const [i, x] of q.questions.entries()) {
     if (!x.text.trim()) return t("Question {n} has no text", { n: i + 1 });
     if (x.answers && x.answers.filter((a) => a.trim()).length < 2) return t("Question {n} needs at least 2 answers", { n: i + 1 });
+    if (x.kind === "type" && !x.accept.some((a) => norm(a))) return t("Question {n} needs the right answer", { n: i + 1 });
     if (x.kind === "quiz" && !x.correct.some((j) => x.answers[j]?.trim())) return t("Question {n}: tap ✓ on the right answer", { n: i + 1 });
   }
   return null;
@@ -570,6 +598,29 @@ function playerView(m) {
         });
         out.push(grid);
       }
+    } else if (m.kind === "type") {
+      if (m.mine != null) out.push(el("p", "typed", m.mine), el("p", "wait", t("Sent. Wait for the others.")));
+      else {
+        const f = el("form", "wordForm");
+        const inp = el("input");
+        inp.maxLength = 60;
+        inp.name = "typed";
+        inp.placeholder = t("Type your answer");
+        inp.autocomplete = "off";
+        inp.setAttribute("autocapitalize", "off");
+        f.append(inp, el("button", "btn primary", t("Send")));
+        f.onsubmit = (e) => {
+          e.preventDefault();
+          if (!inp.value.trim()) return;
+          for (const x of f.elements) x.disabled = true;
+          live.send({ t: "answer", qi: m.qi, v: inp.value });
+        };
+        out.push(f);
+        setTimeout(() => inp.focus(), 50);
+      }
+    } else if (m.kind === "order") {
+      if (m.mine != null) out.push(orderList(m.answers, m.mine), el("p", "wait", t("Sent. Wait for the others.")));
+      else out.push(...orderPicker(m));
     } else if (m.kind === "scale") {
       if (m.mine != null) out.push(el("p", "big-ok", String(m.mine)), el("p", "wait", t("Sent. You can change it until the results.")));
       const row = el("div", "scale");
@@ -602,19 +653,66 @@ function playerView(m) {
     return out;
   }
   // reveal / board
-  if (m.kind === "quiz") {
+  if (scored(m.kind)) {
     if (m.mine == null) out.push(el("p", "big-no", t("No answer this time")));
-    else if (m.correct.includes(m.mine)) out.push(el("p", "big-ok", t("Right!")), el("p", "gain", "+" + m.gained));
+    else if (m.right) out.push(el("p", "big-ok", t("Right!")), el("p", "gain", "+" + m.gained));
     else out.push(el("p", "big-no", t("Not this time")));
-    if (m.answers) {
+    if (m.kind === "quiz" && m.answers) {
       const right = m.correct.map((j) => LETTERS[j] + ": " + m.answers[j]).join(" · ");
       out.push(el("p", "wait", t("Right answer: {a}", { a: right })));
     }
+    if (m.kind === "type" && m.correct) out.push(el("p", "wait", t("Right answer: {a}", { a: m.correct[0] })));
+    if (m.kind === "order" && m.answers) out.push(el("p", "wait", t("The right order:")), orderList(m.answers, m.answers.map((_, i) => i)));
     out.push(el("p", "place", t("You're {rank}", { rank: ordinal(m.rank) })));
   } else {
     out.push(el("p", "big-ok", t("Thanks!")), el("p", "wait", t("Look at the screen for the results.")));
   }
   return out;
+}
+
+// "Put in order": tap the items in the order they go; tap a numbered one to take it (and the ones after it) back
+function orderPicker(m) {
+  const n = m.answers.length;
+  const shown = m.shuf && m.shuf.length === n ? m.shuf : m.answers.map((_, i) => i);
+  const picked = [];
+  const grid = el("div", "pAnswers order n" + n);
+  const send = el("button", "btn primary wide", t("Send"));
+  send.name = "sendOrder";
+  const hint = el("p", "wait", t("Tap them in the right order"));
+  const paint = () => {
+    for (const b of grid.children) {
+      const k = picked.indexOf(Number(b.dataset.i));
+      b.classList.toggle("picked", k >= 0);
+      b.querySelector(".letter").textContent = k >= 0 ? String(k + 1) : "";
+    }
+    send.hidden = picked.length !== n;
+  };
+  shown.forEach((i, j) => {
+    const b = el("button", "pa c" + j);
+    b.dataset.i = i;
+    b.append(el("span", "letter", ""), el("span", "atext", m.answers[i]));
+    b.onclick = () => {
+      const k = picked.indexOf(i);
+      if (k >= 0) picked.splice(k);
+      else picked.push(i);
+      paint();
+    };
+    grid.append(b);
+  });
+  send.onclick = () => {
+    if (picked.length !== n) return;
+    send.disabled = true;
+    for (const x of grid.children) x.disabled = true;
+    live.send({ t: "answer", qi: m.qi, v: [...picked] });
+  };
+  paint();
+  return [hint, grid, send];
+}
+
+function orderList(answers, seq) {
+  const ol = el("ol", "orderList");
+  for (const i of seq) ol.append(el("li", "", answers[i]));
+  return ol;
 }
 
 function chosen(answers, j) {
@@ -680,7 +778,7 @@ function hostScreen(code) {
     if (m.t === "closed") { sessionStorage.removeItem("host:" + code); return go("/", true); }
     if (m.t !== "host") return;
     if (!m.quiz) return live.send({ t: "load", quiz: saved.quiz });
-    Object.assign(snap, { quiz: m.quiz, phase: m.phase, qi: m.qi, boardShown: m.boardShown });
+    Object.assign(snap, { quiz: m.quiz, phase: m.phase, qi: m.qi, boardShown: m.boardShown, shuf: m.shuf || undefined });
     snap.players = [...m.players, ...(m.out || []).map((id) => ({ id, out: true }))];
     if (m.logq && m.qi >= 0) snap.log[m.qi] = m.logq;
     keep();
@@ -763,7 +861,7 @@ function renderHost(code, m, fresh) {
     next.textContent = t("Download results");
     const wrap = el("div", "endHost");
     wrap.append(el("h1", "htitle", m.quiz.title));
-    if (qs.some((x) => x.kind === "quiz") && m.players.length) {
+    if (qs.some((x) => scored(x.kind)) && m.players.length) {
       const pod = el("div", "podium");
       [1, 0, 2].forEach((k) => {
         const p = m.players[k];
@@ -798,7 +896,7 @@ function renderHost(code, m, fresh) {
 
   // question / reveal
   const asking = m.phase === "question";
-  next.textContent = asking ? t("Show results") : q.kind === "quiz" ? t("Ranking") : m.qi >= qs.length - 1 ? t("Finish") : t("Next question");
+  next.textContent = asking ? t("Show results") : scored(q.kind) ? t("Ranking") : m.qi >= qs.length - 1 ? t("Finish") : t("Next question");
   if (fresh) {
     const wrap = el("div", "qHost");
     const top = el("div", "qtop");
@@ -836,6 +934,32 @@ function hostResults(q, m, asking) {
     });
     return [grid];
   }
+  if (q.kind === "type") {
+    if (asking) return [el("p", "typeAsk", t("Type your answer on your phone"))];
+    const box = el("div", "typeRes");
+    box.append(el("p", "typeRight", q.accept[0]));
+    if (q.accept.length > 1) box.append(el("p", "small", t("Also counted: {a}", { a: q.accept.slice(1).join(", ") })));
+    box.append(el("p", "avg", t("{r} of {n} got it right", { r: r?.right || 0, n: r?.total || 0 })));
+    const list = el("div", "typed");
+    for (const [w, c, ok] of r?.top || []) {
+      const s = el("span", "chip" + (ok ? " ok" : ""), w + " · " + c);
+      list.append(s);
+    }
+    box.append(list);
+    return [box];
+  }
+  if (q.kind === "order") {
+    const seq = asking ? m.shuf || q.answers.map((_, i) => i) : q.answers.map((_, i) => i);
+    const grid = el("div", "hAnswers order n" + q.answers.length);
+    seq.forEach((i, j) => {
+      const b = el("div", "ha c" + j + (asking ? "" : " right"));
+      b.append(el("span", "letter", asking ? "" : String(i + 1)), el("span", "atext", q.answers[i]));
+      grid.append(b);
+    });
+    const out = [grid];
+    if (!asking) out.unshift(el("p", "avg", t("{r} of {n} got the order right", { r: r?.right || 0, n: r?.total || 0 })));
+    return out;
+  }
   if (q.kind === "scale") {
     const counts = r?.counts || [0, 0, 0, 0, 0];
     const max = Math.max(1, ...counts);
@@ -867,13 +991,19 @@ function hash(s) { let h = 0; for (const ch of s) h = (h * 31 + ch.charCodeAt(0)
 
 function saveResults(m) {
   const qs = m.quiz.questions;
-  const esc = (v) => /[",\n;]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
+  const esc = (v) => {
+    let s = String(v);
+    if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) s = "'" + s; // a name like "=HYPERLINK(...)" stays text
+    return /[",\n;]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
   const rows = [[t("Name"), t("Points"), ...qs.map((q, i) => (i + 1) + ". " + q.text)]];
   const ranked = Object.entries(m.players).filter(([, p]) => !p.out).sort((a, b) => b[1].score - a[1].score);
   for (const [id, p] of ranked) {
     rows.push([p.name, p.score, ...qs.map((q, i) => {
       const v = m.log[i]?.[id];
       if (v == null) return "";
+      if (q.kind === "type") return v + (isRight(q, v) ? " ✓" : " ✗");
+      if (q.kind === "order") return v.map((i) => q.answers[i]).join(" → ") + (isRight(q, v) ? " ✓" : " ✗");
       if (q.answers) return q.answers[v] + (q.kind === "quiz" ? (q.correct.includes(v) ? " ✓" : " ✗") : "");
       return Array.isArray(v) ? v.join(" / ") : v;
     })]);

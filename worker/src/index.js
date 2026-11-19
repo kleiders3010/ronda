@@ -11,7 +11,30 @@
 const MAX_PLAYERS = 500;
 const MAX_MSG = 256 * 1024; // a whole quiz arrives in one message
 const ROOM_TTL = 6 * 3600 * 1000;
-const KINDS = ["quiz", "poll", "words", "scale"];
+const KINDS = ["quiz", "poll", "words", "scale", "type", "order"];
+// kinds with a right answer: points, ranking, podium
+export const scored = (kind) => kind === "quiz" || kind === "type" || kind === "order";
+// a typed answer counts when it matches one of the accepted ones, ignoring case, accents, spaces and punctuation
+export const norm = (s) => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+export function isRight(q, v) {
+  if (q.kind === "quiz") return q.correct.includes(v);
+  if (q.kind === "type") return typeof v === "string" && !!norm(v) && q.accept.some((a) => norm(a) === norm(v));
+  if (q.kind === "order") return Array.isArray(v) && v.length === q.answers.length && v.every((x, i) => x === i);
+  return false;
+}
+// "Put in order": everyone sees the same mix, never already in order
+export function shuffle(n) {
+  const a = [...Array(n).keys()];
+  if (n < 2) return a;
+  do {
+    for (let i = n - 1; i > 0; i--) {
+      const j = crypto.getRandomValues(new Uint32Array(1))[0] % (i + 1);
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+  } while (a.every((x, i) => x === i));
+  return a;
+}
+const isPerm = (v, n) => Array.isArray(v) && v.length === n && v.every((x) => Number.isInteger(x) && x >= 0 && x < n) && new Set(v).size === n;
 
 // 0: a code made on Cloudflare, 1: one made on the game host
 export const sideOf = (code) => [...String(code)].reduce((a, d) => a + Number(d), 0) % 2;
@@ -78,6 +101,10 @@ export function cleanSnap(s, host) {
       if (!players[id]) continue;
       if (kind === "words") {
         if (Array.isArray(v)) row[id] = v.slice(0, 3).map((w) => str(w, 40).toLowerCase()).filter(Boolean);
+      } else if (kind === "type") {
+        if (str(v, 60)) row[id] = str(v, 60);
+      } else if (kind === "order") {
+        if (isPerm(v, quiz.questions[i].answers.length)) row[id] = v;
       } else if (Number.isInteger(v)) row[id] = v;
     }
     log[i] = row;
@@ -89,6 +116,9 @@ export function cleanSnap(s, host) {
     g.startedAt = Date.now();
     g.endsAt = q.time ? g.startedAt + q.time * 1000 + 1500 : 0;
     g.boardShown = false;
+  }
+  if (phase !== "lobby" && quiz.questions[qi].kind === "order") {
+    g.shuf = isPerm(s.shuf, quiz.questions[qi].answers.length) ? s.shuf : shuffle(quiz.questions[qi].answers.length);
   }
   return g;
 }
@@ -104,6 +134,15 @@ export function cleanQuiz(q) {
     const text = str(x?.text, 300);
     if (!text) continue;
     const out = { kind, text };
+    if (kind === "type") {
+      const seen = new Set();
+      out.accept = (Array.isArray(x.accept) ? x.accept : []).map((a) => str(a, 60)).filter((a) => norm(a) && !seen.has(norm(a)) && seen.add(norm(a))).slice(0, 4);
+      if (!out.accept.length) continue;
+    }
+    if (kind === "order") {
+      out.answers = (Array.isArray(x.answers) ? x.answers : []).map((a) => str(a?.text ?? a, 120)).filter(Boolean).slice(0, 4);
+      if (out.answers.length < 2) continue;
+    }
     if (kind === "quiz" || kind === "poll") {
       const answers = (Array.isArray(x.answers) ? x.answers : []).map((a) => str(a?.text ?? a, 120)).slice(0, 4);
       const keep = answers.map((a, i) => [a, i]).filter(([a]) => a);
@@ -116,8 +155,8 @@ export function cleanQuiz(q) {
       }
     }
     const t = Number(x?.time);
-    out.time = [0, 10, 20, 30, 60, 90, 120].includes(t) ? t : out.kind === "quiz" ? 20 : 0;
-    if (out.kind === "quiz" && !out.time) out.time = 20;
+    out.time = [0, 10, 20, 30, 60, 90, 120].includes(t) ? t : scored(out.kind) ? 20 : 0;
+    if (scored(out.kind) && !out.time) out.time = 20;
     questions.push(out);
   }
   if (!questions.length) return null;
@@ -302,7 +341,7 @@ export class Room {
     if (!g.quiz) return;
     const last = g.quiz.questions.length - 1;
     if (g.phase === "question") return this.reveal();
-    if (g.phase === "reveal" && g.quiz.questions[g.qi].kind === "quiz" && !g.boardShown) {
+    if (g.phase === "reveal" && scored(g.quiz.questions[g.qi].kind) && !g.boardShown) {
       g.boardShown = true;
       g.phase = "board";
     } else if (g.qi >= last && g.phase !== "lobby") {
@@ -315,6 +354,7 @@ export class Room {
       const q = g.quiz.questions[g.qi];
       g.startedAt = Date.now();
       g.endsAt = q.time ? g.startedAt + q.time * 1000 + 1500 : 0; // 1.5 s to read before answers count down
+      g.shuf = q.kind === "order" ? shuffle(q.answers.length) : undefined;
     }
     await this.save(true);
     await this.plan();
@@ -327,9 +367,9 @@ export class Room {
     const q = g.quiz.questions[g.qi];
     g.phase = "reveal";
     g.gained = {};
-    if (q.kind === "quiz") {
+    if (scored(q.kind)) {
       for (const [id, a] of Object.entries(g.ans)) {
-        if (q.correct.includes(a.v)) {
+        if (isRight(q, a.v)) {
           const pts = points(q, Math.max(0, a.at - g.startedAt - 1500));
           g.gained[id] = pts;
           if (g.players[id]) g.players[id].score += pts;
@@ -357,6 +397,14 @@ export class Room {
     } else if (q.kind === "scale") {
       v = Number(msg.v);
       if (!Number.isInteger(v) || v < 1 || v > 5) return;
+    } else if (q.kind === "type") {
+      if (g.ans[id]) return;
+      v = str(msg.v, 60);
+      if (!v) return;
+    } else if (q.kind === "order") {
+      if (g.ans[id]) return;
+      v = Array.isArray(msg.v) ? msg.v.map(Number) : null;
+      if (!isPerm(v, q.answers.length)) return;
     } else {
       const w = str(msg.v, 40).toLowerCase();
       if (!w) return;
@@ -382,6 +430,19 @@ export class Room {
       for (const v of vals) counts[v]++;
       return { counts };
     }
+    if (q.kind === "type") {
+      // the answers people typed, alike ones together (shown as first typed), most common first
+      const by = new Map();
+      for (const v of vals) {
+        const k = norm(v);
+        const e = by.get(k) || { text: v, n: 0, ok: isRight(q, v) };
+        e.n++;
+        by.set(k, e);
+      }
+      return { right: vals.filter((v) => isRight(q, v)).length, total: vals.length,
+        top: [...by.values()].sort((a, b) => b.n - a.n).slice(0, 12).map((e) => [e.text, e.n, e.ok]) };
+    }
+    if (q.kind === "order") return { right: vals.filter((v) => isRight(q, v)).length, total: vals.length };
     if (q.kind === "scale") {
       const counts = [0, 0, 0, 0, 0];
       for (const v of vals) counts[v - 1]++;
@@ -402,7 +463,7 @@ export class Room {
   hostView() {
     const g = this.g;
     const q = g.qi >= 0 && g.quiz ? g.quiz.questions[g.qi] : null;
-    const live = q && (g.phase !== "question" || q.kind !== "quiz");
+    const live = q && (g.phase !== "question" || !scored(q.kind));
     return {
       t: "host",
       phase: g.phase,
@@ -414,6 +475,7 @@ export class Room {
       boardShown: !!g.boardShown,
       answered: Object.keys(g.ans).length,
       results: live ? this.results() : null,
+      shuf: q?.kind === "order" ? g.shuf : null,
       endsIn: g.phase === "question" && g.endsAt ? g.endsAt - Date.now() : 0,
       readIn: g.phase === "question" ? Math.max(0, g.startedAt + 1500 - Date.now()) : 0,
     };
@@ -438,12 +500,14 @@ export class Room {
     const mine = g.ans[id]?.v ?? null;
     if (g.phase === "question") {
       return { ...base, qi: g.qi, n, kind: q.kind, text: q.text, answers: q.answers || null, mine,
+        shuf: q.kind === "order" ? g.shuf : null,
         endsIn: g.endsAt ? g.endsAt - Date.now() : 0, readIn: Math.max(0, g.startedAt + 1500 - Date.now()) };
     }
     const rank = this.ranking().findIndex((r) => r.id === id) + 1;
-    if (g.phase === "end") return { ...base, rank, of: this.ranking().length, quizzy: g.quiz.questions.some((x) => x.kind === "quiz") };
+    if (g.phase === "end") return { ...base, rank, of: this.ranking().length, quizzy: g.quiz.questions.some((x) => scored(x.kind)) };
     return { ...base, qi: g.qi, n, kind: q.kind, text: q.text, answers: q.answers || null, mine,
-      correct: q.kind === "quiz" ? q.correct : null, gained: g.gained?.[id] || 0, rank };
+      correct: q.kind === "quiz" ? q.correct : q.kind === "type" ? q.accept : null,
+      right: scored(q.kind) && mine != null ? isRight(q, mine) : null, gained: g.gained?.[id] || 0, rank };
   }
 
   everyone() {

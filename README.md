@@ -10,6 +10,10 @@ their phone with a short code. No account, no player limit, nothing to install, 
 - **Poll**: people vote, the bars fill live.
 - **Words**: everyone sends up to 3 words, shown as a word cloud.
 - **Scale**: everyone picks 1 to 5, shows the average.
+- **Type answer**: people type the answer; capitals, accents, spaces and punctuation don't matter, and you can
+  add other spellings that count. The screen shows the answer and what people typed.
+- **Put in order**: everyone gets the same items mixed up and taps them back in order; only the full right order
+  scores.
 - Download the results as a spreadsheet (CSV). Share a ronda as a link: the whole quiz travels inside the link.
 - Send feedback (start page and the big screen): a problem or an idea, an optional email for an answer and, if you keep the tick, technical details (browser, page, errors; never quiz content or names). "See what's sent" shows it all first. Emailed to hello@jurisgames.com through [jurisgames-feedback](https://github.com/kleiders3010/jurisgames-feedback), which stores nothing.
 
