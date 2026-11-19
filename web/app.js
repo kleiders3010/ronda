@@ -367,33 +367,87 @@ async function startHosting(q) {
     $("#editMsg").hidden = false;
     return;
   }
-  try {
-    const r = await fetch("/api/new", { method: "POST" });
-    if (!r.ok) throw new Error(r.status);
-    const { code, token } = await r.json();
-    sessionStorage.setItem("host:" + code, JSON.stringify({ token, quiz: { title: q.title, questions: q.questions } }));
-    go("/host/" + code);
-  } catch {
-    toast(t("Couldn't start. Check the internet and try again."));
+  for (const at of SERVERS[1] ? [0, 1] : [0]) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 6000);
+    try {
+      const r = await fetch(SERVERS[at].replace(/^ws/, "http") + "/api/new", { method: "POST", signal: ctl.signal });
+      if (!r.ok) throw new Error(r.status);
+      const { code, token } = await r.json();
+      sessionStorage.setItem("host:" + code, JSON.stringify({ token, at, quiz: { title: q.title, questions: q.questions } }));
+      return go("/host/" + code);
+    } catch {
+    } finally {
+      clearTimeout(timer);
+    }
   }
+  toast(t("Couldn't start. Check the internet and try again."));
 }
 
-// ---------------- live connection (auto-reconnects) ----------------
-const LIVE = { opens: 0, drops: 0 }; // for "Send feedback": how often the live link dropped
-function connect(code, onOpen, onMsg) {
-  let ws, stopped = false, wait = 500;
-  const base = new URLSearchParams(location.search).get("server") || location.origin.replace(/^http/, "ws");
+// ---------------- live connection (auto-reconnects, two servers) ----------------
+// Rooms run on two servers that run the same code (Kleider: "all parts of the app should work even if one the pieces
+// break down"): this site's own (Cloudflare) and the game host's (games.jurisgames.com/ronda). A code's digits say
+// which one made it (an even sum: the first). When one stops answering, the host's screen moves the game to the
+// other and everyone follows.
+const RP = new URLSearchParams(location.search);
+const OURS = /(^|\.)jurisgames\.com$|\.github\.io$/.test(location.hostname);
+const SERVERS = [
+  RP.get("server") || (location.hostname.endsWith(".github.io") ? "wss://quiz.jurisgames.com" : location.origin.replace(/^http/, "ws")),
+  RP.get("server2") || (OURS && !RP.get("server") ? "wss://games.jurisgames.com/ronda" : null),
+];
+const sideOf = (code) => [...code].reduce((a, d) => a + Number(d), 0) % 2;
+const homeOf = (code) => (SERVERS[1] && sideOf(code) ? 1 : 0);
+const otherOf = (at) => (SERVERS[1 - at] ? 1 - at : at);
+const LIVE = { opens: 0, drops: 0, moves: 0 }; // for "Send feedback": how often the live link dropped
+function connect(code, onOpen, onMsg, { at = homeOf(code), patience = 2 } = {}) {
+  let ws, stopped = false, wait = 500, fails = 0;
   const open = () => {
-    ws = new WebSocket(base + "/ws/" + code);
-    ws.onopen = () => { wait = 500; LIVE.opens++; onOpen(); };
-    ws.onmessage = (e) => { try { onMsg(JSON.parse(e.data)); } catch {} };
-    ws.onclose = () => { if (!stopped) { LIVE.drops++; setTimeout(open, wait); wait = Math.min(wait * 2, 8000); } };
+    let opened = false;
+    const sock = (ws = new WebSocket(SERVERS[at] + "/ws/" + code));
+    const timer = setTimeout(() => { if (!opened) sock.close(); }, 5000);
+    sock.onopen = () => { opened = true; clearTimeout(timer); wait = 500; fails = 0; LIVE.opens++; onOpen(at); };
+    sock.onmessage = (e) => { if (sock === ws) try { onMsg(JSON.parse(e.data), at); } catch {} };
+    sock.onclose = () => {
+      clearTimeout(timer);
+      if (stopped || sock !== ws) return;
+      LIVE.drops++;
+      // a server that doesn't answer a few times in a row: the other one
+      if (!opened && ++fails >= patience && otherOf(at) !== at) { at = otherOf(at); fails = 0; LIVE.moves++; }
+      setTimeout(open, wait);
+      wait = Math.min(wait * 2, 4000);
+    };
   };
   open();
   return {
     send: (m) => { if (ws.readyState === 1) ws.send(JSON.stringify(m)); },
     stop: () => { stopped = true; try { ws.close(); } catch {} },
+    get at() { return at; },
+    move: (to) => {
+      const old = ws;
+      at = to;
+      fails = 0;
+      wait = 500;
+      ws = null;
+      try { old.close(); } catch {}
+      if (!stopped) open();
+    },
   };
+}
+
+// the old server is told the game went on elsewhere, as soon as it answers again, so anyone still there follows
+function tellMoved(code, from, token, alive) {
+  let tries = 0;
+  const once = () => {
+    if (!alive() || tries++ > 120) return;
+    let done = false;
+    const w = new WebSocket(SERVERS[from] + "/ws/" + code);
+    w.onopen = () => w.send(JSON.stringify({ t: "moved", token }));
+    w.onmessage = (e) => {
+      try { if (["moved", "gone", "denied"].includes(JSON.parse(e.data).t)) (done = true), w.close(); } catch {}
+    };
+    w.onclose = () => { if (!done) setTimeout(once, 15000); };
+  };
+  setTimeout(once, 1000);
 }
 
 // ---------------- player ----------------
@@ -446,7 +500,14 @@ function playScreen(code, name) {
   const main = $("#pMain");
   main.replaceChildren(el("p", "wait", t("Joining…")));
   let lastKey = "";
-  live = connect(code, () => live.send({ t: "join", id: pid, name }), (m) => {
+  const gone = new Set(); // servers that said they don't have this ronda
+  live = connect(code, () => live.send({ t: "join", id: pid, name }), (m, at) => {
+    if (m.t === "moved" && otherOf(at) !== at) return live.move(otherOf(at));
+    if (m.t === "gone" && otherOf(at) !== at && !gone.has(otherOf(at))) {
+      gone.add(at);
+      return live.move(otherOf(at));
+    }
+    if (m.t === "view") gone.clear();
     if (m.t === "gone" || m.t === "closed") return endMsg(t("This ronda has ended. Thanks for playing!"));
     if (m.t === "over") return endMsg(t("This ronda has already finished."));
     if (m.t === "full") return endMsg(t("This ronda is full ({max} people)", { max: m.max }));
@@ -582,18 +643,49 @@ function hostScreen(code) {
   main.replaceChildren(el("p", "wait", t("Opening the room…")));
   let st = null;
   let lastKey = "";
-  live = connect(code, () => live.send({ t: "host", token: saved.token }), (m) => {
+  // the copy of the game this screen keeps: enough to carry on on the other server
+  const snap = saved.snap || { quiz: saved.quiz, phase: "lobby", qi: -1, players: [], log: [] };
+  let keepTimer = 0;
+  const keep = () => {
+    if (keepTimer) return;
+    keepTimer = setTimeout(() => {
+      keepTimer = 0;
+      try { sessionStorage.setItem("host:" + code, JSON.stringify({ ...saved, snap })); } catch {}
+    }, 1500);
+  };
+  const resume = (at) => {
+    const from = saved.at ?? homeOf(code);
+    saved.at = at;
+    keep();
+    live.send({ t: "resume", token: saved.token, snap });
+    if (from !== at) {
+      const mine = live;
+      tellMoved(code, from, saved.token, () => live === mine);
+    }
+  };
+  const first = saved.at ?? homeOf(code);
+  live = connect(code, (at) => {
+    if (at === (saved.at ?? first)) live.send({ t: "host", token: saved.token });
+    else resume(at);
+  }, (m, at) => {
+    // this server lost the ronda (or never had it): it carries on from the copy
+    if (m.t === "gone" && snap.quiz) return resume(at);
+    if (m.t === "moved") return;
     if (m.t === "denied" || m.t === "gone") { toast(t("This ronda has ended")); sessionStorage.removeItem("host:" + code); return go("/", true); }
     if (m.t === "bad-quiz") { toast(t("Something in this ronda can't be used")); return go("/", true); }
     if (m.t === "export") return saveResults(m);
     if (m.t === "closed") { sessionStorage.removeItem("host:" + code); return go("/", true); }
     if (m.t !== "host") return;
     if (!m.quiz) return live.send({ t: "load", quiz: saved.quiz });
+    Object.assign(snap, { quiz: m.quiz, phase: m.phase, qi: m.qi, boardShown: m.boardShown });
+    snap.players = [...m.players, ...(m.out || []).map((id) => ({ id, out: true }))];
+    if (m.logq && m.qi >= 0) snap.log[m.qi] = m.logq;
+    keep();
     st = m;
     const key = [m.phase, m.qi].join("|");
     renderHost(code, m, key !== lastKey);
     lastKey = key;
-  });
+  }, { at: first, patience: 3 });
   live.host = true;
   $("#hNext").onclick = () => {
     if (!st) return;

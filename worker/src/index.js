@@ -1,16 +1,26 @@
 // Ronda: the web app (static files) and its live rooms, one Worker.
 // One Durable Object per room code runs one live game: the host's quiz, who joined, their answers and points.
 // Nothing is kept after the room closes (6 hours after the last activity at most).
+//
+// The same code runs on two servers (Kleider, 2026-11-18: "all parts of the app should work even if one the pieces
+// break down"): here on Cloudflare, and on Node on our game host (kinetic/server.mjs, games.jurisgames.com/ronda).
+// A room code says where it was made: the digits add up to an even number here, odd there (SIDE), so the two never
+// hand out the same code. If its server stops answering, the host's screen moves the game to the other one
+// ("resume", from the copy it keeps) and players follow.
 
 const MAX_PLAYERS = 500;
 const MAX_MSG = 256 * 1024; // a whole quiz arrives in one message
 const ROOM_TTL = 6 * 3600 * 1000;
 const KINDS = ["quiz", "poll", "words", "scale"];
 
+// 0: a code made on Cloudflare, 1: one made on the game host
+export const sideOf = (code) => [...String(code)].reduce((a, d) => a + Number(d), 0) % 2;
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
     if (url.pathname === "/api/new" && req.method === "POST") return newRoom(env);
+    if (url.pathname === "/api/new" && req.method === "OPTIONS") return new Response(null, { headers: CORS });
     const m = url.pathname.match(/^\/ws\/(\d{6})$/);
     if (m) {
       if (req.headers.get("Upgrade") !== "websocket") return new Response("expected a websocket", { status: 426 });
@@ -27,14 +37,60 @@ function randomToken(n = 24) {
   return [...a].map((b) => "abcdefghijkmnpqrstuvwxyz23456789"[b % 32]).join("");
 }
 
-async function newRoom(env) {
+// the site copy on GitHub Pages and the other server's site start rooms here too
+const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST", "Cache-Control": "no-store" };
+
+export async function newRoom(env) {
   const token = randomToken();
+  const side = env.SIDE === "odd" ? 1 : 0;
   for (let i = 0; i < 8; i++) {
-    const code = String(100000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900000));
+    let code = String(100000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900000));
+    if (sideOf(code) !== side) code = code.slice(0, 5) + ((Number(code[5]) + 1) % 10);
     const r = await env.ROOMS.get(env.ROOMS.idFromName(code)).fetch("https://room/claim", { method: "POST", body: token });
-    if (r.ok) return Response.json({ code, token }, { headers: { "Cache-Control": "no-store" } });
+    if (r.ok) return Response.json({ code, token }, { headers: CORS });
   }
-  return Response.json({ error: "busy" }, { status: 503 });
+  return Response.json({ error: "busy" }, { status: 503, headers: CORS });
+}
+
+// a game the host's screen brings over from the other server, cleaned like everything else that arrives
+export function cleanSnap(s, host) {
+  const quiz = cleanQuiz(s?.quiz);
+  if (!quiz) return null;
+  const last = quiz.questions.length - 1;
+  const phases = ["lobby", "question", "reveal", "board", "end"];
+  let phase = phases.includes(s.phase) ? s.phase : "lobby";
+  let qi = Math.max(-1, Math.min(last, Math.trunc(Number(s.qi)) || 0));
+  if (Number(s.qi) === -1 || phase === "lobby") (qi = -1), (phase = "lobby");
+  const players = {};
+  for (const p of (Array.isArray(s.players) ? s.players : []).slice(0, MAX_PLAYERS)) {
+    const id = String(p?.id || "");
+    if (!/^[A-Za-z0-9_-]{8,40}$/.test(id) || players[id]) continue;
+    players[id] = { name: str(p.name, 30) || "Player", score: Math.max(0, Math.min(1e7, Math.trunc(Number(p.score)) || 0)) };
+    if (p.out) players[id].out = true;
+  }
+  const log = [];
+  for (let i = 0; i <= Math.max(qi, 0) && i < (Array.isArray(s.log) ? s.log.length : 0); i++) {
+    const q = s.log[i];
+    if (!q || typeof q !== "object") continue;
+    const kind = quiz.questions[i].kind;
+    const row = {};
+    for (const [id, v] of Object.entries(q)) {
+      if (!players[id]) continue;
+      if (kind === "words") {
+        if (Array.isArray(v)) row[id] = v.slice(0, 3).map((w) => str(w, 40).toLowerCase()).filter(Boolean);
+      } else if (Number.isInteger(v)) row[id] = v;
+    }
+    log[i] = row;
+  }
+  const g = { host, phase, quiz, qi, players, ans: {}, log, touched: Date.now(), boardShown: phase === "board" || !!s.boardShown };
+  if (phase === "question") {
+    // the question starts again: the answers given to it were on the server that went away
+    const q = quiz.questions[qi];
+    g.startedAt = Date.now();
+    g.endsAt = q.time ? g.startedAt + q.time * 1000 + 1500 : 0;
+    g.boardShown = false;
+  }
+  return g;
 }
 
 // ---- quiz validation: the host's device sends the quiz; keep only what the game uses, bounded ----
@@ -156,9 +212,29 @@ export class Room {
     } catch (_) {
       return;
     }
-    const g = await this.game();
+    let g = await this.game();
+    // the host's screen brings the game over from the other server (or back after this one lost it)
+    if (msg.t === "resume") {
+      if (g && msg.token !== g.host) return this.send(ws, { t: "denied" });
+      const snap = cleanSnap(msg.snap, String(msg.token || ""));
+      if (!snap || !/^[a-z0-9]{24}$/.test(snap.host)) return this.send(ws, { t: "bad-quiz" });
+      for (const s of this.state.getWebSockets()) if (s !== ws && (s.deserializeAttachment() || {}).role === "host") s.close(1000, "moved");
+      g = this.g = snap;
+      ws.serializeAttachment({ role: "host" });
+      await this.save(true);
+      await this.plan();
+      return this.everyone();
+    }
     if (!g) return this.send(ws, { t: "gone" });
     const me = ws.deserializeAttachment() || {};
+    // the game went on on the other server: whoever is still here follows it
+    if (msg.t === "moved") {
+      if (msg.token !== g.host) return this.send(ws, { t: "denied" });
+      for (const s of this.state.getWebSockets()) this.send(s, { t: "moved" });
+      this.g = null;
+      await this.state.storage.deleteAll();
+      return;
+    }
 
     if (msg.t === "host") {
       if (msg.token !== g.host) return this.send(ws, { t: "denied" });
@@ -333,6 +409,9 @@ export class Room {
       quiz: g.quiz,
       qi: g.qi,
       players: this.ranking(),
+      out: Object.keys(g.players).filter((id) => g.players[id].out), // the host's copy of the game keeps these
+      logq: g.qi >= 0 && g.phase !== "question" ? g.log[g.qi] || {} : null,
+      boardShown: !!g.boardShown,
       answered: Object.keys(g.ans).length,
       results: live ? this.results() : null,
       endsIn: g.phase === "question" && g.endsAt ? g.endsAt - Date.now() : 0,

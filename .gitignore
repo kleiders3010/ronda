@@ -7,3 +7,6 @@ dist/
 *.jks
 *.keystore
 local.properties
+node_modules/
+kinetic/room.mjs
+kinetic/data/
