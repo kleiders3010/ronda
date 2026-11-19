@@ -274,3 +274,14 @@ div.typed .chip.ok { outline: 2px solid #86efac; }
 .qcard.drop { outline: 3px dashed var(--accent, #6d28d9); outline-offset: 2px; }
 .qimg { flex: 1 1 0; min-height: 0; max-height: 42vh; width: 100%; object-fit: contain; }
 .qHost:has(.qimg) .res { flex: 0 0 auto; }
+/* answers that are pictures */
+.apic { display: flex; align-items: center; gap: 4px; flex: none; }
+.apicAdd { width: 40px; height: 40px; border-radius: 10px; background: rgba(255,255,255,.22); color: #fff; display: grid; place-items: center; }
+.apicThumb { width: 44px; height: 40px; object-fit: cover; border-radius: 8px; background: #fff3; }
+.apicDrop { width: 26px; height: 26px; border-radius: 50%; background: rgba(0,0,0,.35); color: #fff; font-size: 13px; }
+.hAnswers.pics { flex: 1 1 0; min-height: 0; grid-auto-rows: 1fr; }
+.qHost:has(.hAnswers.pics) .res { flex: 1 1 0; }
+.hAnswers.pics .ha { padding: 1vh 14px; gap: 10px; min-height: 0; font-size: clamp(16px, 1.8vw, 26px); }
+.hAnswers.pics .ha .aimg { flex: 1 1 0; min-width: 0; height: 100%; max-height: 100%; object-fit: contain; }
+.hAnswers.pics .ha .atext { flex: 0 1 auto; }
+.hAnswers.pics .ha .atext:empty { display: none; }

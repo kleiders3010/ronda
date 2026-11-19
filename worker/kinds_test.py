@@ -42,7 +42,7 @@ with sync_playwright() as p:
     first = e.locator(".qcard").first
     first.locator("button[name=addAnswer]").click()
     first.locator("button[name=addAnswer]").click()
-    check(first.locator(".aedit input").count() == 6 and first.locator("button[name=addAnswer]").count() == 0,
+    check(first.locator(".aedit input:not([type=file])").count() == 6 and first.locator("button[name=addAnswer]").count() == 0,
           "a question can have up to 6 answers (+ Answer, then it's gone)")  # pinned: 6 like Kahoot's paid plans
     e.click("[data-add='type']")
     e.wait_for_selector("input[name='accept']")

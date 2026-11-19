@@ -124,15 +124,30 @@ async function unpackQuiz(s) {
   return JSON.parse(new TextDecoder().decode(bytes));
 }
 // questions without their pictures: what links and the server get (pictures stay on this device, pics.js)
-const bare = (qs) => qs.map(({ img, ...x }) => x);
+const bare = (qs) => qs.map(({ img, aimg, ...x }) => x);
+const PIC_ONLY = "\u{1F5BC}"; // what phones and the server get for an answer that is only a picture
+// the picture keys a question uses
+const picsOf = (x) => [x.img, ...(x.aimg || [])].filter(isPic);
+// phones show a picture-only answer by its letter and colour alone (like Kahoot, whose phones show only the tiles)
+const aText = (a) => (a === PIC_ONLY ? "" : a);
+const withLetter = (answers, j) => (answers[j] === PIC_ONLY ? LETTERS[j] : LETTERS[j] + ": " + answers[j]);
 async function adopt(data) {
   if (!data || !Array.isArray(data.questions)) throw new Error("not a ronda");
   const q = { id: randId(10), title: String(data.title || "").slice(0, 120), questions: data.questions.slice(0, 100) };
+  const take = async (v) => {
+    if (typeof v !== "string" || !/^data:image\/(webp|jpeg|png|gif);base64,/.test(v) || v.length > 4e6) return null;
+    try { return await putPic(v); } catch { return null; }
+  };
   for (const x of q.questions) {
-    const img = x?.img;
-    if (x) delete x.img;
-    if (typeof img === "string" && /^data:image\/(webp|jpeg|png|gif);base64,/.test(img) && img.length < 4e6) {
-      try { x.img = await putPic(img); } catch {}
+    if (!x || typeof x !== "object") continue;
+    const img = x.img, aimg = x.aimg;
+    delete x.img;
+    delete x.aimg;
+    if ((x.img = await take(img)) == null) delete x.img;
+    if (Array.isArray(aimg) && Array.isArray(x.answers) && (x.kind === "quiz" || x.kind === "poll")) {
+      const keys = [];
+      for (const v of aimg.slice(0, x.answers.length)) keys.push(await take(v));
+      if (keys.some(Boolean)) x.aimg = keys;
     }
   }
   putQuiz(q);
@@ -142,9 +157,11 @@ async function adopt(data) {
 async function quizFile(q) {
   const questions = [];
   for (const x of q.questions) {
-    const pic = await getPic(x.img);
-    const { img, ...rest } = x;
-    questions.push(pic ? { ...rest, img: pic } : rest);
+    const { img, aimg, ...rest } = x;
+    const pic = await getPic(img);
+    if (pic) rest.img = pic;
+    if (aimg?.some(Boolean)) rest.aimg = await Promise.all(aimg.map((k) => getPic(k)));
+    questions.push(rest);
   }
   return JSON.stringify({ title: q.title, questions }, null, 1);
 }
@@ -194,7 +211,7 @@ function homeScreen() {
   fileRow.append(fb);
   ul.append(fileRow);
   $("#code").value = "";
-  keepOnly(new Set(list.flatMap((q) => q.questions.map((x) => x.img)).filter(isPic)));
+  keepOnly(new Set(list.flatMap((q) => q.questions.flatMap(picsOf))));
 }
 $("#code").addEventListener("input", (e) => {
   const d = e.target.value.replace(/\D/g, "").slice(0, 6);
@@ -268,6 +285,7 @@ function renderQuestions() {
       n.text = q.text;
       if (q.img) n.img = q.img;
       if (q.answers && n.answers) n.answers = q.answers;
+      if (q.aimg && (n.kind === "quiz" || n.kind === "poll")) n.aimg = q.aimg;
       editing.questions[i] = n;
       touch();
       renderQuestions();
@@ -337,6 +355,7 @@ function renderQuestions() {
         inp.value = a;
         inp.oninput = () => { q.answers[j] = inp.value; touch(); };
         row.append(inp);
+        if (q.kind === "quiz" || q.kind === "poll") row.append(answerPic(q, j, inp));
         if (q.kind === "quiz") {
           const ok = el("button", "okBtn" + (q.correct.includes(j) ? " on" : ""), q.correct.includes(j) ? "✓" : "");
           ok.title = t("Right answer");
@@ -376,9 +395,9 @@ function problems(q) {
   if (!q.questions.length) return t("Add a question first");
   for (const [i, x] of q.questions.entries()) {
     if (!x.text.trim()) return t("Question {n} has no text", { n: i + 1 });
-    if (x.answers && x.answers.filter((a) => a.trim()).length < 2) return t("Question {n} needs at least 2 answers", { n: i + 1 });
+    if (x.answers && x.answers.filter((a, j) => a.trim() || x.aimg?.[j]).length < 2) return t("Question {n} needs at least 2 answers", { n: i + 1 });
     if (x.kind === "type" && !x.accept.some((a) => norm(a))) return t("Question {n} needs the right answer", { n: i + 1 });
-    if (x.kind === "quiz" && !x.correct.some((j) => x.answers[j]?.trim())) return t("Question {n}: tap ✓ on the right answer", { n: i + 1 });
+    if (x.kind === "quiz" && !x.correct.some((j) => x.answers[j]?.trim() || x.aimg?.[j])) return t("Question {n}: tap ✓ on the right answer", { n: i + 1 });
   }
   return null;
 }
@@ -420,22 +439,55 @@ $("#fileBtn").onclick = async () => {
   downloadFile((editing.title || "ronda") + ".json", await quizFile(editing), "application/json");
 };
 
-// the question's picture (like Kahoot's): add (button, drop or paste), see, change, remove
-function picEdit(q, card) {
-  const box = el("div", "picEdit");
-  const set = async (file) => {
-    const url = await shrink(file);
-    if (!url) return toast(t("That isn't a picture"));
-    try { q.img = await putPic(url); } catch { return toast(t("This device has no room for more pictures")); }
-    touch();
-    renderQuestions();
-  };
+// a picture file -> stored, its key handed to done(); then the editor redraws
+async function takePic(file, done) {
+  const url = await shrink(file);
+  if (!url) return toast(t("That isn't a picture"));
+  try { done(await putPic(url)); } catch { return toast(t("This device has no room for more pictures")); }
+  touch();
+  renderQuestions();
+}
+function picInput(name, onFile) {
   const input = el("input");
   input.type = "file";
   input.accept = "image/*";
   input.hidden = true;
-  input.name = "picFile";
-  input.onchange = () => { const f = input.files[0]; input.value = ""; if (f) set(f); };
+  input.name = name;
+  input.onchange = () => { const f = input.files[0]; input.value = ""; if (f) onFile(f); };
+  return input;
+}
+// an answer that is a picture (like Kahoot's image answers): the words become optional
+function answerPic(q, j, inp) {
+  const box = el("span", "apic");
+  const input = picInput("answerPicFile", (f) => takePic(f, (k) => { q.aimg ||= []; q.aimg[j] = k; }));
+  const key = q.aimg?.[j];
+  if (key) {
+    inp.placeholder = t("Words (optional)");
+    const img = el("img", "apicThumb");
+    img.alt = t("Picture");
+    getPic(key).then((u) => { if (u) img.src = u; });
+    const drop = el("button", "apicDrop", "✕");
+    drop.title = t("Remove picture");
+    drop.name = "dropAnswerPic";
+    drop.onclick = () => { q.aimg[j] = null; if (!q.aimg.some(Boolean)) delete q.aimg; touch(); renderQuestions(); };
+    box.append(img, drop);
+  } else {
+    const add = el("button", "apicAdd");
+    add.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="10" r="2" fill="currentColor"/><path d="M4 18l5-5 3 3 3-4 5 6z" fill="currentColor"/></svg>';
+    add.title = t("Make this answer a picture");
+    add.name = "addAnswerPic";
+    add.onclick = () => input.click();
+    box.append(add);
+  }
+  box.append(input);
+  return box;
+}
+
+// the question's picture (like Kahoot's): add (button, drop or paste), see, change, remove
+function picEdit(q, card) {
+  const box = el("div", "picEdit");
+  const set = (file) => takePic(file, (k) => { q.img = k; });
+  const input = picInput("picFile", set);
   card.ondragover = (e) => { if ([...e.dataTransfer.items].some((i) => i.kind === "file")) { e.preventDefault(); card.classList.add("drop"); } };
   card.ondragleave = () => card.classList.remove("drop");
   card.ondrop = (e) => { const f = e.dataTransfer.files[0]; card.classList.remove("drop"); if (f) { e.preventDefault(); set(f); } };
@@ -484,7 +536,16 @@ async function startHosting(q) {
       const r = await fetch(SERVERS[at].replace(/^ws/, "http") + "/api/new", { method: "POST", signal: ctl.signal });
       if (!r.ok) throw new Error(r.status);
       const { code, token } = await r.json();
-      sessionStorage.setItem("host:" + code, JSON.stringify({ token, at, quiz: { title: q.title, questions: bare(q.questions) }, pics: q.questions.map((x) => x.img || null) }));
+      const questions = bare(q.questions).map((x, i) => {
+        const aimg = q.questions[i].aimg;
+        return aimg && x.answers ? { ...x, answers: x.answers.map((a, j) => (a.trim() ? a : aimg[j] ? PIC_ONLY : a)) } : x;
+      });
+      const pics = questions.map((x, i) => {
+        const src = q.questions[i];
+        const a = src.aimg && x.answers ? x.answers.map((v, j) => [v, src.aimg[j] || null]).filter(([v]) => v.trim()).map(([, k]) => k) : null;
+        return src.img || a ? { q: src.img || null, a } : null;
+      });
+      sessionStorage.setItem("host:" + code, JSON.stringify({ token, at, quiz: { title: q.title, questions }, pics }));
       return go("/host/" + code);
     } catch {
     } finally {
@@ -733,7 +794,7 @@ function playerView(m) {
         const grid = el("div", "pAnswers n" + m.answers.length);
         m.answers.forEach((a, j) => {
           const b = el("button", "pa c" + j);
-          b.append(el("span", "letter", LETTERS[j]), el("span", "atext", a));
+          b.append(el("span", "letter", LETTERS[j]), el("span", "atext", aText(a)));
           b.onclick = () => { for (const x of grid.children) x.disabled = true; b.classList.add("picked"); live.send({ t: "answer", qi: m.qi, v: j }); };
           grid.append(b);
         });
@@ -799,8 +860,8 @@ function playerView(m) {
     else if (m.right) out.push(el("p", "big-ok", t("Right!")), el("p", "gain", "+" + m.gained));
     else out.push(el("p", "big-no", t("Not this time")));
     if (m.kind === "quiz" && m.answers && !m.right) {
-      if (m.mine != null) out.push(el("p", "said", t("You said {a}", { a: LETTERS[m.mine] + ": " + m.answers[m.mine] })));
-      const right = m.correct.map((j) => LETTERS[j] + ": " + m.answers[j]).join(" · ");
+      if (m.mine != null) out.push(el("p", "said", t("You said {a}", { a: withLetter(m.answers, m.mine) })));
+      const right = m.correct.map((j) => withLetter(m.answers, j)).join(" · ");
       out.push(el("p", "wait", t("Right answer: {a}", { a: right })));
     }
     if (m.kind === "type" && m.correct && !m.right) out.push(el("p", "wait", t("Right answer: {a}", { a: m.correct[0] })));
@@ -859,7 +920,7 @@ function orderList(answers, seq) {
 
 function chosen(answers, j) {
   const b = el("div", "pa c" + j + " picked solo");
-  b.append(el("span", "letter", LETTERS[j]), el("span", "atext", answers[j]));
+  b.append(el("span", "letter", LETTERS[j]), el("span", "atext", aText(answers[j])));
   return b;
 }
 
@@ -883,6 +944,9 @@ function hostScreen(code) {
   show("host");
   keepAwake();
   hostPics = saved.pics || [];
+  // pictures are drawn without waiting (results redraw often): load them all first, then redraw once
+  Promise.all(hostPics.flatMap((x) => [x?.q, ...(x?.a || [])]).filter(isPic).map(async (k) => hostUrls.set(k, await getPic(k))))
+    .then(() => { if (st && live) renderHost(code, st, true); });
   const main = $("#hMain");
   main.replaceChildren(el("p", "wait", t("Opening the room…")));
   let st = null;
@@ -1042,6 +1106,7 @@ function qr(text) {
 }
 
 let hostPics = [];
+const hostUrls = new Map();
 function renderHost(code, m, fresh) {
   const main = $("#hMain");
   const qs = m.quiz.questions;
@@ -1126,11 +1191,12 @@ function renderHost(code, m, fresh) {
     const top = el("div", "qtop");
     top.append(el("span", "progress", t("Question {i} of {n}", { i: m.qi + 1, n: qs.length })), el("span", "answered"));
     wrap.append(top, el("h1", "htext", q.text));
-    if (hostPics[m.qi]) {
+    const qpic = hostUrls.get(hostPics[m.qi]?.q);
+    if (qpic) {
       const img = el("img", "qimg");
       img.alt = "";
+      img.src = qpic;
       wrap.append(img);
-      getPic(hostPics[m.qi]).then((u) => { if (u) img.src = u; else img.remove(); });
     }
     if (asking && m.endsIn) {
       const tb = timerBar();
@@ -1149,12 +1215,20 @@ function hostResults(q, m, asking) {
   const r = m.results;
   if (q.kind === "quiz" || q.kind === "poll") {
     const total = r ? Math.max(1, ...r.counts) : 1;
-    const grid = el("div", "hAnswers n" + q.answers.length);
+    const apics = (hostPics[m.qi]?.a || []).map((k) => hostUrls.get(k) || null);
+    const grid = el("div", "hAnswers n" + q.answers.length + (apics.some(Boolean) ? " pics" : ""));
     q.answers.forEach((a, j) => {
       const right = !asking && q.kind === "quiz" && q.correct.includes(j);
       const wrong = !asking && q.kind === "quiz" && !right;
       const b = el("div", "ha c" + j + (right ? " right" : "") + (wrong ? " faded" : ""));
-      b.append(el("span", "letter", LETTERS[j]), el("span", "atext", a));
+      b.append(el("span", "letter", LETTERS[j]));
+      if (apics[j]) {
+        const img = el("img", "aimg");
+        img.alt = a === PIC_ONLY ? t("Picture {l}", { l: LETTERS[j] }) : a;
+        img.src = apics[j];
+        b.append(img);
+      }
+      b.append(el("span", "atext", a === PIC_ONLY && apics[j] ? "" : a));
       if (r) {
         b.style.setProperty("--w", r.counts[j] / total);
         b.append(el("span", "cnt", String(r.counts[j])));
@@ -1239,7 +1313,7 @@ function saveResults(m) {
       if (v == null) return "";
       if (q.kind === "type") return v + (isRight(q, v) ? " ✓" : " ✗");
       if (q.kind === "order") return v.map((i) => q.answers[i]).join(" → ") + (isRight(q, v) ? " ✓" : " ✗");
-      if (q.answers) return q.answers[v] + (q.kind === "quiz" ? (q.correct.includes(v) ? " ✓" : " ✗") : "");
+      if (q.answers) return (q.answers[v] === PIC_ONLY ? LETTERS[v] : q.answers[v]) + (q.kind === "quiz" ? (q.correct.includes(v) ? " ✓" : " ✗") : "");
       return Array.isArray(v) ? v.join(" / ") : v;
     })]);
   }
