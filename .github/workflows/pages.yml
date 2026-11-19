@@ -1,9 +1,9 @@
 # The second copy of the site: https://kleiders3010.github.io/ronda/ (used when quiz.jurisgames.com is down).
-# Built from web/ on every push to master by tools/mirror.mjs.
+# Built from web/ on every push to main by tools/mirror.mjs.
 name: Site copy on GitHub Pages
 on:
   push:
-    branches: [master]
+    branches: [main]
     paths: ["web/**", "tools/mirror.mjs", ".github/workflows/pages.yml"]
   workflow_dispatch:
 permissions:
