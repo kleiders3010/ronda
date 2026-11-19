@@ -2,6 +2,7 @@
 // Quizzes live on this device (localStorage) and travel as links or files. The server only runs live rooms.
 import { t, translatePage, LANG } from "./i18n.js";
 import { openFeedback } from "./feedback.js";
+import { watchDirect } from "./direct.js";
 // the folder the app lives in: "/" on quiz.jurisgames.com, "/ronda/" on the copy at GitHub Pages
 const BASE = new URL(".", import.meta.url).pathname;
 const here = () => "/" + location.pathname.slice(BASE.length); // the app's own path ("/host/123456")
@@ -438,6 +439,8 @@ const SERVERS = [
   RP.get("server") || (location.hostname.endsWith(".github.io") ? "wss://quiz.jurisgames.com" : location.origin.replace(/^http/, "ws")),
   RP.get("server2") || (OURS && !RP.get("server") ? "wss://games.jurisgames.com/ronda" : null),
 ];
+// Cloudflare down: the game host straight (direct.js)
+watchDirect(SERVERS[1], (url) => { SERVERS[1] = url; });
 const sideOf = (code) => [...code].reduce((a, d) => a + Number(d), 0) % 2;
 const homeOf = (code) => (SERVERS[1] && sideOf(code) ? 1 : 0);
 const otherOf = (at) => (SERVERS[1 - at] ? 1 - at : at);
