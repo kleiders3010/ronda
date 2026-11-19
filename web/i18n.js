@@ -1,7 +1,7 @@
 // UI language: the browser's, or ?lang=xx in the link. English text is the key; other languages map it.
 // Add a language: copy the "es" block, translate the right-hand side.
 
-import { FEEDBACK_ES } from "/feedback.js";
+import { FEEDBACK_ES } from "./feedback.js";
 
 const DICT = {
   es: { // Spanish as spoken in Argentina (vos)

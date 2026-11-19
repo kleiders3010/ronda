@@ -72,7 +72,7 @@ try:
             h.evaluate("q => localStorage.setItem('rondas', JSON.stringify([q]))", Q)
             h.reload()
             h.click(".mineRow .btn.primary")
-            h.wait_for_url("**/host/*", timeout=20000)
+            h.wait_for_url(lambda u: "/host/" in u, timeout=30000)
             code = h.url.split("/host/")[1].split("?")[0][:6]
             h.wait_for_selector("#hNext:not([disabled])")
             return h, code

@@ -32,7 +32,7 @@ with sync_playwright() as p:
         h.evaluate("q => localStorage.setItem('rondas', JSON.stringify([q]))", Q)
         h.reload()
         h.click(".mineRow .btn.primary")
-        h.wait_for_url("**/host/*", timeout=30000)
+        h.wait_for_url(lambda u: "/host/" in u, timeout=30000)
         code = h.url.split("/host/")[1][:6]
         check(sum(map(int, code)) % 2 == want_side, f"{what}: the ronda starts there (code {code})")
         pl = page()

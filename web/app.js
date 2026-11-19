@@ -1,7 +1,10 @@
 // Ronda: make a quiz or poll, show it on a big screen, everyone answers on their phone.
 // Quizzes live on this device (localStorage) and travel as links or files. The server only runs live rooms.
-import { t, translatePage, LANG } from "/i18n.js";
-import { openFeedback } from "/feedback.js";
+import { t, translatePage, LANG } from "./i18n.js";
+import { openFeedback } from "./feedback.js";
+// the folder the app lives in: "/" on quiz.jurisgames.com, "/ronda/" on the copy at GitHub Pages
+const BASE = new URL(".", import.meta.url).pathname;
+const here = () => "/" + location.pathname.slice(BASE.length); // the app's own path ("/host/123456")
 
 const $ = (s) => document.querySelector(s);
 const el = (tag, cls, text) => {
@@ -43,7 +46,7 @@ function show(id) {
   window.scrollTo(0, 0);
 }
 function go(path, replace = false) {
-  history[replace ? "replaceState" : "pushState"](null, "", path);
+  history[replace ? "replaceState" : "pushState"](null, "", BASE + path.slice(1) + location.search);
   route();
 }
 window.addEventListener("popstate", route);
@@ -57,7 +60,7 @@ function closeLive() {
 }
 
 function route() {
-  const p = location.pathname;
+  const p = here();
   closeLive();
   let m;
   if ((m = p.match(/^\/(\d{6})$/))) return nameScreen(m[1]);
@@ -337,7 +340,7 @@ $("#delBtn").onclick = () => {
 };
 $("#shareBtn").onclick = async () => {
   putQuiz(editing);
-  const url = location.origin + "/#r=" + (await packQuiz(editing));
+  const url = location.origin + BASE + "#r=" + (await packQuiz(editing));
   const title = editing.title || "Ronda";
   if (navigator.share) {
     try { await navigator.share({ title, text: t("A ronda to use or copy: {title}", { title }), url }); return; } catch (e) { if (e.name === "AbortError") return; }
@@ -362,7 +365,7 @@ function downloadFile(name, text, type) {
 async function startHosting(q) {
   const msg = problems(q);
   if (msg) {
-    if (location.pathname !== "/edit/" + q.id) go("/edit/" + q.id);
+    if (here() !== "/edit/" + q.id) go("/edit/" + q.id);
     $("#editMsg").textContent = msg;
     $("#editMsg").hidden = false;
     return;
@@ -731,11 +734,11 @@ function renderHost(code, m, fresh) {
       const wrap = el("div", "lobbyHost");
       const left = el("div", "joinInfo");
       left.append(el("h1", "htitle", m.quiz.title));
-      left.append(el("p", "joinAt", t("Join at {site} with the code", { site: location.host })));
+      left.append(el("p", "joinAt", t("Join at {site} with the code", { site: location.host + BASE.replace(/\/$/, "") })));
       left.append(el("p", "bigCode", fmtCode(code)));
 
       const qrBox = el("div", "qrBox");
-      if (window.qrcode) qrBox.append(qr(location.origin + "/" + code), el("p", "small", t("or scan this with the phone camera")));
+      if (window.qrcode) qrBox.append(qr(location.origin + BASE + code), el("p", "small", t("or scan this with the phone camera")));
       wrap.append(left, qrBox);
       const people = el("div", "people");
       main.replaceChildren(wrap, el("p", "count"), people);
