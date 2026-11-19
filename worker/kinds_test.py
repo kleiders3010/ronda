@@ -3,7 +3,7 @@
 # the screen shows the answer, how many got it and what people typed. Put in order: both see the same mix (never
 # already in order), Ana taps them back in order and scores, Beto doesn't. The ranking, the podium and the results
 # file (with ✓/✗) count both kinds. Also: the editor offers both kinds and won't start a type question with no answer.
-#   python worker/kinds_test.py [site]   (local: cd worker && npx wrangler dev --port 8788)
+#   python worker/kinds_test.py [site] [query, to pick the server]   (local: cd worker && npx wrangler dev --port 8788)
 import csv
 import io
 import sys
@@ -11,6 +11,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 from playwright.sync_api import sync_playwright
 
 SITE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8788"
+QS = sys.argv[2] if len(sys.argv) > 2 else ""  # e.g. ?server=wss://down.invalid&server2=wss://games.jurisgames.com/ronda
 STEPS = ["Wake up", "Breakfast", "Lunch", "Dinner"]
 Q = {"id": "kinds01", "title": "Kinds check", "questions": [
     {"kind": "type", "text": "Capital of Argentina?", "accept": ["Buenos Aires", "CABA", "", ""], "time": 60},
@@ -34,7 +35,7 @@ with sync_playwright() as p:
 
     # the editor
     e = page()
-    e.goto(SITE + "/")
+    e.goto(SITE + "/" + QS)
     e.click("#makeBtn")
     e.wait_for_selector("[data-add='type']")
     check(e.is_visible("[data-add='order']"), "the editor offers Type answer and Put in order")
@@ -43,7 +44,7 @@ with sync_playwright() as p:
     e.context.close()
 
     h = page()
-    h.goto(SITE + "/")
+    h.goto(SITE + "/" + QS)
     h.evaluate("q => localStorage.setItem('rondas', JSON.stringify([q]))", Q)
     h.reload()
     h.click(".mineRow .btn.primary")
@@ -52,7 +53,7 @@ with sync_playwright() as p:
     pl = {}
     for n in ("Ana", "Beto"):
         pg = page()
-        pg.goto(f"{SITE}/{code}")
+        pg.goto(f"{SITE}/{code}{QS}")
         pg.fill("#nameInput", n)
         pg.press("#nameInput", "Enter")
         pl[n] = pg
