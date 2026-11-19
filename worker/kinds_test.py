@@ -39,6 +39,11 @@ with sync_playwright() as p:
     e.click("#makeBtn")
     e.wait_for_selector("[data-add='type']")
     check(e.is_visible("[data-add='order']"), "the editor offers Type answer and Put in order")
+    first = e.locator(".qcard").first
+    first.locator("button[name=addAnswer]").click()
+    first.locator("button[name=addAnswer]").click()
+    check(first.locator(".aedit input").count() == 6 and first.locator("button[name=addAnswer]").count() == 0,
+          "a question can have up to 6 answers (+ Answer, then it's gone)")  # pinned: 6 like Kahoot's paid plans
     e.click("[data-add='type']")
     e.wait_for_selector("input[name='accept']")
     e.context.close()

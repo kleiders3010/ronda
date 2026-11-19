@@ -29,6 +29,7 @@ const DICT = {
     "Words": "Palabras",
     "Scale": "Escala",
     "Type answer": "Escribir la respuesta",
+    "+ Answer": "+ Respuesta",
     "Put in order": "Ordenar",
     "Ask a question people answer by typing": "Hacé una pregunta que se responde escribiendo",
     "Ask people to put things in order": "Pedí que ordenen cosas",

@@ -1,5 +1,5 @@
 # Short screens: a host on a 1280x720 laptop (or projector) and players on a phone held sideways (740x360) and
-# upright (360x640), with a long question and four long answers. Checked: the host sees the question, all four
+# upright (360x640), with a long question and six long answers, then four. Checked: the host sees the question, all four
 # answers and the Next button without scrolling; a player can reach (and tap) every answer.
 #   python worker/screens_test.py [site]
 import sys
@@ -8,9 +8,11 @@ from playwright.sync_api import sync_playwright
 
 SITE = sys.argv[1] if len(sys.argv) > 1 else "https://quiz.jurisgames.com"
 LONG = "Which of these rivers flows through the most countries before it reaches the sea, counting every border it crosses?"
-ANS = ["The Danube, through ten countries", "The Nile, from Lake Victoria north", "The Amazon, mostly through Brazil", "The Rhine, from the Alps to the North Sea"]
+ANS = ["The Danube, through ten countries", "The Nile, from Lake Victoria north", "The Amazon, mostly through Brazil", "The Rhine, from the Alps to the North Sea",
+       "The Mekong, from Tibet to Vietnam", "The Niger, in a long arc through West Africa"]
 Q = {"id": "screens01", "title": "Screens check", "questions": [
-    {"kind": "quiz", "text": LONG, "answers": ANS, "correct": [0], "time": 120}]}
+    {"kind": "quiz", "text": LONG, "answers": ANS, "correct": [0], "time": 120},
+    {"kind": "quiz", "text": LONG, "answers": ANS[:4], "correct": [0], "time": 120}]}
 errors = []
 
 
@@ -49,16 +51,22 @@ with sync_playwright() as p:
         pl.press("#nameInput", "Enter")
         players.append((pl, w, ht))
     h.wait_for_function("document.body.textContent.includes('P1')", timeout=30000)
-    h.click("#hNext")
-    h.wait_for_selector(".ha", timeout=30000)
-    h.wait_for_timeout(800)
-    seen = h.evaluate(IN_VIEW, ".ha, #hNext")
-    check(len(seen) == 5 and all(seen), f"1280x720 host: four answers and Next on screen without scrolling ({seen})")
-    for pl, w, ht in players:
-        pl.wait_for_selector(".pa.c3", timeout=30000)
-        pl.wait_for_timeout(500)
-        r = pl.evaluate(REACH, ".pa")
-        check(len(r) == 4 and all(r), f"{w}x{ht} player: every answer can be reached and tapped ({r})")
+    for n in (6, 4):
+        h.click("#hNext")  # the question
+        h.wait_for_function(f"document.querySelectorAll('.ha').length === {n}", timeout=30000)
+        h.wait_for_timeout(800)
+        seen = h.evaluate(IN_VIEW, ".ha, #hNext")
+        check(len(seen) == n + 1 and all(seen), f"1280x720 host: {n} answers and Next on screen without scrolling ({seen})")
+        for pl, w, ht in players:
+            pl.wait_for_function(f"document.querySelectorAll('.pa').length === {n}", timeout=30000)
+            pl.wait_for_timeout(500)
+            r = pl.evaluate(REACH, ".pa")
+            check(len(r) == n and all(r), f"{w}x{ht} player: all {n} answers can be reached and tapped ({r})")
+        if n == 6:
+            h.click("#hNext")  # results
+            h.wait_for_selector(".ha.right", timeout=30000)
+            h.click("#hNext")  # ranking
+            h.wait_for_selector(".board", timeout=30000)
     h.context.close()
     b.close()
 

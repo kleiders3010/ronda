@@ -12,6 +12,7 @@ const MAX_PLAYERS = 500;
 const MAX_MSG = 256 * 1024; // a whole quiz arrives in one message
 const ROOM_TTL = 6 * 3600 * 1000;
 const KINDS = ["quiz", "poll", "words", "scale", "type", "order"];
+const MAX_ANSWERS = 6;
 // kinds with a right answer: points, ranking, podium
 export const scored = (kind) => kind === "quiz" || kind === "type" || kind === "order";
 // a typed answer counts when it matches one of the accepted ones, ignoring case, accents, spaces and punctuation
@@ -140,11 +141,11 @@ export function cleanQuiz(q) {
       if (!out.accept.length) continue;
     }
     if (kind === "order") {
-      out.answers = (Array.isArray(x.answers) ? x.answers : []).map((a) => str(a?.text ?? a, 120)).filter(Boolean).slice(0, 4);
+      out.answers = (Array.isArray(x.answers) ? x.answers : []).map((a) => str(a?.text ?? a, 120)).filter(Boolean).slice(0, MAX_ANSWERS);
       if (out.answers.length < 2) continue;
     }
     if (kind === "quiz" || kind === "poll") {
-      const answers = (Array.isArray(x.answers) ? x.answers : []).map((a) => str(a?.text ?? a, 120)).slice(0, 4);
+      const answers = (Array.isArray(x.answers) ? x.answers : []).map((a) => str(a?.text ?? a, 120)).slice(0, MAX_ANSWERS);
       const keep = answers.map((a, i) => [a, i]).filter(([a]) => a);
       if (keep.length < 2) continue;
       out.answers = keep.map(([a]) => a);

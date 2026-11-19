@@ -13,7 +13,8 @@ const el = (tag, cls, text) => {
   if (text != null) e.textContent = text;
   return e;
 };
-const LETTERS = ["A", "B", "C", "D"];
+const LETTERS = ["A", "B", "C", "D", "E", "F"];
+const MAX_ANSWERS = 6; // the server keeps up to this many (worker/src/index.js)
 const KIND_NAME = { quiz: "Quiz", poll: "Poll", words: "Words", scale: "Scale", type: "Type answer", order: "Put in order" };
 // kinds with a right answer (points, ranking); the same rules as the server's (worker/src/index.js)
 const scored = (k) => k === "quiz" || k === "type" || k === "order";
@@ -328,6 +329,17 @@ function renderQuestions() {
         grid.append(row);
       });
       li.append(grid);
+      if (q.answers.length < MAX_ANSWERS) {
+        const more = el("button", "btn chip addAnswer", t("+ Answer"));
+        more.name = "addAnswer";
+        more.onclick = () => {
+          q.answers.push("");
+          touch();
+          renderQuestions();
+          document.querySelectorAll(".qcard")[i]?.querySelectorAll(".aedit input")[q.answers.length - 1]?.focus();
+        };
+        li.append(more);
+      }
       if (q.kind === "quiz") li.append(el("p", "small hint", t("Tap ✓ on the right answer. Faster right answers get more points.")));
       if (q.kind === "order") li.append(el("p", "small hint", t("Write them in the right order. Everyone sees them mixed up and puts them back.")));
     } else {
