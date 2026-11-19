@@ -45,8 +45,18 @@
 </section>
 
 <section id="play" class="page player" hidden>
-  <header class="pbar"><span id="pName" class="pname"></span><span id="pScore" class="pscore"></span></header>
+  <header class="pbar"><span id="pName" class="pname"></span><button type="button" id="pQa" class="btn chip qaBtn" hidden>Questions</button><span id="pScore" class="pscore"></span></header>
   <main id="pMain" class="pmain"></main>
+  <div id="pQaBox" class="qaBox" hidden>
+    <header class="qaHead"><b>Questions for the host</b><button type="button" id="pQaClose" class="btn chip">Close</button></header>
+    <form id="askForm" class="askForm">
+      <textarea name="ask" maxlength="160" rows="2" placeholder="Ask the host something"></textarea>
+      <div class="askRow"><label class="anon"><input type="checkbox" name="anon"> Ask anonymously</label><button class="btn primary" name="sendAsk">Send</button></div>
+    </form>
+    <p id="askClosed" class="small" hidden>The host closed questions for now</p>
+    <div class="qaSort"><button type="button" class="btn chip" data-sort="top">Popular</button><button type="button" class="btn chip" data-sort="new">Recent</button></div>
+    <ul id="pQaList" class="qaList"></ul>
+  </div>
 </section>
 
 <!-- Editor -->
@@ -79,9 +89,25 @@
 <!-- Host screen (big screen) -->
 <section id="host" class="page dark" hidden>
   <main id="hMain" class="hmain"></main>
+  <div id="hQaShow" class="qaShow" hidden>
+    <div class="qaCard">
+      <p class="qaWho"></p>
+      <p class="qaBig"></p>
+      <p class="qaVotes"></p>
+      <div class="qaCardBtns"><button type="button" class="btn chip dim" data-do="hide">Hide</button><button type="button" class="btn primary" data-do="done">Answered</button></div>
+    </div>
+  </div>
+  <aside id="hQaPanel" class="qaPanel" hidden>
+    <header class="qaHead"><b>Audience questions</b><button type="button" id="hQaClose" class="btn chip dim">Close</button></header>
+    <label class="anon"><input type="checkbox" id="qaOpen"> People can ask from their phones</label>
+    <label class="anon"><input type="checkbox" id="qaMod"> I approve each question before it shows</label>
+    <div class="qaSort"><button type="button" class="btn chip dim" data-sort="top">Popular</button><button type="button" class="btn chip dim" data-sort="new">Recent</button><span class="grow"></span><button type="button" id="qaSave" class="btn chip dim">Save</button></div>
+    <ul id="hQaList" class="qaList"></ul>
+  </aside>
   <footer class="hfoot">
     <span id="hInfo" class="small"></span>
     <span class="grow"></span>
+    <button id="hQa" class="btn chip dim">Questions</button>
     <button class="btn chip dim fbOpen">Feedback</button>
     <button id="hFull" class="btn chip dim">Full screen</button>
     <button id="hNext" class="btn primary big">Start</button>

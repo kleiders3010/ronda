@@ -13,6 +13,30 @@ const MAX_MSG = 256 * 1024; // a whole quiz arrives in one message
 const ROOM_TTL = 6 * 3600 * 1000;
 const KINDS = ["quiz", "poll", "words", "scale", "type", "order"];
 const MAX_ANSWERS = 6;
+// audience questions (like Slido's Q&A): people ask the host, everyone upvotes
+const MAX_QA = 100;
+const QA_PER_PLAYER = 10;
+const QA_LEN = 160;
+const QA_ST = ["", "wait", "hi", "done"]; // shown, waiting for the host's OK, on the big screen, answered
+
+// the questions the host's copy carries over to the other server (bounded, only people of this game)
+export function cleanQa(x, players) {
+  const qa = { open: x?.open !== false, mod: !!x?.mod, list: [] }; // pinned: open by default, no review step
+  const seen = new Set();
+  let hi = false;
+  for (const it of (Array.isArray(x?.list) ? x.list : []).slice(0, MAX_QA)) {
+    const id = String(it?.id || "");
+    const text = str(it?.text, QA_LEN);
+    if (!/^[a-z0-9]{6,12}$/.test(id) || seen.has(id) || !text) continue;
+    seen.add(id);
+    let st = QA_ST.includes(it.st) ? it.st : "";
+    if (st === "hi") (hi ? (st = "") : (hi = true));
+    const up = [...new Set((Array.isArray(it.up) ? it.up : []).map(String))].filter((p) => players[p]);
+    qa.list.push({ id, by: players[it.by] ? String(it.by) : "", name: str(it.name, 30), text,
+      at: Math.trunc(Number(it.at)) || Date.now(), up, st });
+  }
+  return qa;
+}
 // kinds with a right answer: points, ranking, podium
 export const scored = (kind) => kind === "quiz" || kind === "type" || kind === "order";
 // a typed answer counts when it matches one of the accepted ones, ignoring case, accents, spaces and punctuation
@@ -110,7 +134,8 @@ export function cleanSnap(s, host) {
     }
     log[i] = row;
   }
-  const g = { host, phase, quiz, qi, players, ans: {}, log, touched: Date.now(), boardShown: phase === "board" || !!s.boardShown };
+  const g = { host, phase, quiz, qi, players, ans: {}, log, touched: Date.now(), boardShown: phase === "board" || !!s.boardShown,
+    qa: cleanQa(s.qa, players) };
   if (phase === "question") {
     // the question starts again: the answers given to it were on the server that went away
     const q = quiz.questions[qi];
@@ -179,6 +204,7 @@ export class Room {
 
   async game() {
     if (!this.g) this.g = (await this.state.storage.get("g")) || null;
+    if (this.g && !this.g.qa) this.g.qa = cleanQa(null, {});
     return this.g;
   }
 
@@ -224,7 +250,7 @@ export class Room {
       const g = await this.game();
       if (g && Date.now() < g.touched + ROOM_TTL) return new Response("taken", { status: 409 });
       await this.state.storage.deleteAll();
-      this.g = { host: await req.text(), phase: "lobby", quiz: null, qi: -1, players: {}, ans: {}, log: [], touched: Date.now() };
+      this.g = { host: await req.text(), phase: "lobby", quiz: null, qi: -1, players: {}, ans: {}, log: [], touched: Date.now(), qa: cleanQa(null, {}) };
       await this.save(true);
       await this.plan();
       return new Response("ok");
@@ -263,6 +289,7 @@ export class Room {
       ws.serializeAttachment({ role: "host" });
       await this.save(true);
       await this.plan();
+      this.qaSend();
       return this.everyone();
     }
     if (!g) return this.send(ws, { t: "gone" });
@@ -298,11 +325,15 @@ export class Room {
       if (p.out) return this.send(ws, { t: "removed" });
       ws.serializeAttachment({ role: "player", id });
       this.send(ws, this.playerView(id));
+      this.send(ws, this.playerQa(id));
       return this.hostsUpdate();
     }
 
     if (me.role === "player") {
+      if (g.players[me.id]?.out) return;
       if (msg.t === "answer") return this.answer(me.id, msg);
+      if (msg.t === "ask") return this.ask(ws, me.id, msg);
+      if (msg.t === "vote") return this.vote(me.id, msg);
       return;
     }
     if (me.role !== "host") return;
@@ -328,6 +359,7 @@ export class Room {
       return this.hostsUpdate();
     }
     if (msg.t === "export") return this.send(ws, { t: "export", log: g.log, players: g.players, quiz: g.quiz });
+    if (msg.t === "qa") return this.qaAct(msg);
     if (msg.t === "close") {
       g.touched = 0;
       for (const s of this.state.getWebSockets()) if (s !== ws) this.send(s, { t: "closed" });
@@ -454,6 +486,82 @@ export class Room {
     return { words: Object.entries(words).sort((a, b) => b[1] - a[1]).slice(0, 80) };
   }
 
+  // ---- audience questions ----
+  async ask(ws, id, msg) {
+    const qa = this.g.qa;
+    const text = str(msg.text, QA_LEN);
+    if (!text) return;
+    if (!qa.open) return this.send(ws, { t: "qa-closed" });
+    if (qa.list.length >= MAX_QA || qa.list.filter((x) => x.by === id).length >= QA_PER_PLAYER) return this.send(ws, { t: "qa-full" });
+    qa.list.push({ id: randomToken(8), by: id, name: msg.anon ? "" : this.g.players[id].name, text, at: Date.now(), up: [],
+      st: qa.mod ? "wait" : "" });
+    await this.save();
+    this.qaUpdate();
+  }
+
+  async vote(id, msg) {
+    const it = this.g.qa.list.find((x) => x.id === msg.id);
+    if (!it || it.st === "wait" || it.st === "done") return;
+    const k = it.up.indexOf(id);
+    if (msg.up && k < 0) it.up.push(id);
+    else if (!msg.up && k >= 0) it.up.splice(k, 1);
+    else return;
+    await this.save();
+    this.qaUpdate();
+  }
+
+  async qaAct(msg) {
+    const qa = this.g.qa;
+    const d = msg.do;
+    if (d === "open" || d === "close") qa.open = d === "open";
+    else if (d === "mod" || d === "nomod") qa.mod = d === "mod";
+    else {
+      const it = qa.list.find((x) => x.id === msg.id);
+      if (!it) return;
+      if (d === "del") qa.list.splice(qa.list.indexOf(it), 1);
+      else if (d === "show") {
+        for (const x of qa.list) if (x.st === "hi") x.st = "";
+        it.st = "hi";
+      } else if (d === "ok" || d === "hide" || d === "undone") it.st = "";
+      else if (d === "done") it.st = "done";
+      else return;
+    }
+    await this.save();
+    this.qaUpdate(true);
+  }
+
+  hostQa() {
+    const { open, mod, list } = this.g.qa;
+    // an anonymous question doesn't tell the host who asked
+    return { t: "qa", open, mod, list: list.map((x) => ({ ...x, by: x.name ? x.by : "" })) };
+  }
+
+  playerQa(id) {
+    const { open, mod, list } = this.g.qa;
+    return { t: "qa", open, mod, list: list.filter((x) => x.st !== "wait" || x.by === id).map((x) => (
+      { id: x.id, name: x.name, text: x.text, at: x.at, st: x.st, n: x.up.length, me: x.up.includes(id), mine: x.by === id })) };
+  }
+
+  // votes come in bursts: one update for everyone every quarter second at most (the host's own actions go at once)
+  qaUpdate(now = false) {
+    if (now) {
+      clearTimeout(this.qaTimer);
+      this.qaTimer = null;
+      return this.qaSend();
+    }
+    if (!this.qaTimer) this.qaTimer = setTimeout(() => { this.qaTimer = null; this.qaSend(); }, 250);
+  }
+
+  qaSend() {
+    if (!this.g) return;
+    const h = this.hostQa();
+    for (const ws of this.sockets("host")) this.send(ws, h);
+    for (const ws of this.sockets("player")) {
+      const id = ws.deserializeAttachment().id;
+      if (this.g.players[id] && !this.g.players[id].out) this.send(ws, this.playerQa(id));
+    }
+  }
+
   ranking() {
     return Object.entries(this.g.players)
       .filter(([, p]) => !p.out)
@@ -484,6 +592,7 @@ export class Room {
 
   toHost(ws) {
     this.send(ws, this.hostView());
+    this.send(ws, this.hostQa());
   }
 
   hostsUpdate() {

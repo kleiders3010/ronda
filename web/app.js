@@ -555,6 +555,9 @@ function playScreen(code, name) {
     if (m.t === "over") return endMsg(t("This ronda has already finished."));
     if (m.t === "full") return endMsg(t("This ronda is full ({max} people)", { max: m.max }));
     if (m.t === "removed") return endMsg(t("The host removed you from this ronda."));
+    if (m.t === "qa") return playerQa(m);
+    if (m.t === "qa-full") return toast(t("No more questions can be asked here"));
+    if (m.t === "qa-closed") return toast(t("The host closed questions for now"));
     if (m.t !== "view") return;
     $("#pName").textContent = m.name;
     $("#pScore").textContent = m.score ? t("{n} points", { n: m.score }) : "";
@@ -566,8 +569,67 @@ function playScreen(code, name) {
   });
   function endMsg(text) {
     closeLive();
+    $("#pQa").hidden = $("#pQaBox").hidden = true;
     main.replaceChildren(el("p", "wait", text), homeLink());
   }
+  $("#pQa").hidden = $("#pQaBox").hidden = true;
+  $("#pQa").onclick = () => { $("#pQaBox").hidden = false; drawPlayerQa(); $("#askForm").ask.focus(); };
+  $("#pQaClose").onclick = () => { $("#pQaBox").hidden = true; };
+  $("#askForm").onsubmit = (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const text = f.ask.value.trim();
+    if (!text) return f.ask.focus();
+    live.send({ t: "ask", text, anon: f.anon.checked });
+    f.ask.value = "";
+    toast(qa?.mod ? t("Sent. The host will see it first.") : t("Sent"));
+  };
+  for (const b of document.querySelectorAll("#pQaBox [data-sort]")) b.onclick = () => { qaSort = b.dataset.sort; drawPlayerQa(); };
+}
+
+// ---------------- audience questions (like Slido's Q&A) ----------------
+let qa = null; // the last list from the server
+let qaSort = "top";
+const qaVotes = (x) => x.n ?? x.up.length;
+// on the screen now first, then waiting for the host, then the rest by votes (or newest), answered last
+function qaSorted(list) {
+  const rank = { hi: 0, wait: 1, "": 2, done: 3 };
+  return [...list].sort((a, b) => rank[a.st] - rank[b.st] || (qaSort === "new" ? 0 : qaVotes(b) - qaVotes(a)) || b.at - a.at);
+}
+const QA_TAG = { hi: "On the screen now", wait: "Waiting for the host", done: "Answered" };
+
+function playerQa(m) {
+  qa = m;
+  const open = m.list.filter((x) => x.st !== "done").length;
+  $("#pQa").hidden = !m.open && !m.list.length;
+  $("#pQa").textContent = open ? t("Questions ({n})", { n: open }) : t("Questions");
+  if (!$("#pQaBox").hidden) drawPlayerQa();
+}
+
+function drawPlayerQa() {
+  if (!qa) return;
+  $("#askForm").hidden = !qa.open;
+  $("#askClosed").hidden = qa.open;
+  for (const b of document.querySelectorAll("#pQaBox [data-sort]")) b.classList.toggle("on", b.dataset.sort === qaSort);
+  const ul = $("#pQaList");
+  ul.replaceChildren(...qaSorted(qa.list).map((x) => {
+    const li = el("li", "qaItem " + (x.st || "live"));
+    const body = el("div", "qaBody");
+    body.append(el("p", "qaText", x.text));
+    const meta = el("p", "qaMeta", x.name || t("Anonymous"));
+    if (x.mine) meta.append(el("span", "qaTag", t("Yours")));
+    if (QA_TAG[x.st]) meta.append(el("span", "qaTag " + x.st, t(QA_TAG[x.st])));
+    body.append(meta);
+    const up = el("button", "vote" + (x.me ? " on" : ""), "▲ " + x.n);
+    up.name = "vote";
+    up.setAttribute("aria-pressed", x.me ? "true" : "false");
+    up.setAttribute("aria-label", t("Vote for this question ({n} votes)", { n: x.n }));
+    up.disabled = x.st === "wait" || x.st === "done";
+    up.onclick = () => live.send({ t: "vote", id: x.id, up: !x.me });
+    li.append(body, up);
+    return li;
+  }));
+  if (!qa.list.length) ul.append(el("li", "small qaNone", t("No questions yet. Ask the first one.")));
 }
 
 function homeLink() {
@@ -788,6 +850,11 @@ function hostScreen(code) {
     if (m.t === "bad-quiz") { toast(t("Something in this ronda can't be used")); return go("/", true); }
     if (m.t === "export") return saveResults(m);
     if (m.t === "closed") { sessionStorage.removeItem("host:" + code); return go("/", true); }
+    if (m.t === "qa") {
+      snap.qa = { open: m.open, mod: m.mod, list: m.list };
+      keep();
+      return hostQa(m);
+    }
     if (m.t !== "host") return;
     if (!m.quiz) return live.send({ t: "load", quiz: saved.quiz });
     Object.assign(snap, { quiz: m.quiz, phase: m.phase, qi: m.qi, boardShown: m.boardShown, shuf: m.shuf || undefined });
@@ -811,6 +878,81 @@ function hostScreen(code) {
     else document.documentElement.requestFullscreen?.().catch(() => {});
   };
   $("#hFull").hidden = !document.documentElement.requestFullscreen;
+  qa = snap.qa || null;
+  $("#hQaPanel").hidden = $("#hQaShow").hidden = true;
+  $("#hQa").textContent = t("Questions");
+  $("#hQa").onclick = () => { $("#hQaPanel").hidden = !$("#hQaPanel").hidden; drawHostQa(); };
+  $("#hQaClose").onclick = () => { $("#hQaPanel").hidden = true; };
+  $("#qaOpen").onchange = (e) => live.send({ t: "qa", do: e.target.checked ? "open" : "close" });
+  $("#qaMod").onchange = (e) => live.send({ t: "qa", do: e.target.checked ? "mod" : "nomod" });
+  for (const b of document.querySelectorAll("#hQaPanel [data-sort]")) b.onclick = () => { qaSort = b.dataset.sort; drawHostQa(); };
+  for (const b of document.querySelectorAll("#hQaShow [data-do]")) b.onclick = () => {
+    const hi = qa?.list.find((x) => x.st === "hi");
+    if (hi) live.send({ t: "qa", do: b.dataset.do, id: hi.id });
+  };
+  $("#qaSave").onclick = () => saveQuestions(snap.quiz?.title);
+}
+
+function hostQa(m) {
+  qa = m;
+  const waiting = m.list.filter((x) => x.st === "wait").length;
+  const open = m.list.filter((x) => x.st !== "done").length;
+  $("#hQa").textContent = waiting ? t("Questions ({n} to approve)", { n: waiting }) : open ? t("Questions ({n})", { n: open }) : t("Questions");
+  $("#hQa").classList.toggle("ping", waiting > 0);
+  const hi = m.list.find((x) => x.st === "hi");
+  const show = $("#hQaShow");
+  show.hidden = !hi;
+  if (hi) {
+    show.querySelector(".qaWho").textContent = hi.name ? t("{name} asks", { name: hi.name }) : t("Someone asks");
+    show.querySelector(".qaBig").textContent = hi.text;
+    show.querySelector(".qaVotes").textContent = (hi.up.length === 1 ? t("1 vote") : t("{n} votes", { n: hi.up.length }));
+  }
+  drawHostQa();
+}
+
+function drawHostQa() {
+  if (!qa || $("#hQaPanel").hidden) return;
+  $("#qaOpen").checked = qa.open;
+  $("#qaMod").checked = qa.mod;
+  for (const b of document.querySelectorAll("#hQaPanel [data-sort]")) b.classList.toggle("on", b.dataset.sort === qaSort);
+  const act = (label, d, x, cls = "btn chip dim") => {
+    const b = el("button", cls, t(label));
+    b.name = d;
+    b.onclick = () => {
+      live.send({ t: "qa", do: d, id: x.id });
+      if (d === "show") $("#hQaPanel").hidden = true; // the room sees the question, not the list
+    };
+    return b;
+  };
+  const ul = $("#hQaList");
+  ul.replaceChildren(...qaSorted(qa.list).map((x) => {
+    const li = el("li", "qaItem " + (x.st || "live"));
+    const body = el("div", "qaBody");
+    body.append(el("p", "qaText", x.text));
+    const meta = el("p", "qaMeta", (x.name || t("Anonymous")) + " · ▲ " + x.up.length);
+    if (QA_TAG[x.st]) meta.append(el("span", "qaTag " + x.st, t(QA_TAG[x.st])));
+    const btns = el("div", "qaBtns");
+    if (x.st === "wait") btns.append(act("Approve", "ok", x, "btn chip"));
+    if (x.st === "" || x.st === "wait") btns.append(act("Show on screen", "show", x, "btn primary"));
+    if (x.st === "hi") btns.append(act("Hide", "hide", x));
+    if (x.st === "hi" || x.st === "") btns.append(act("Answered", "done", x));
+    if (x.st === "done") btns.append(act("Not answered", "undone", x));
+    btns.append(act("Delete", "del", x, "btn chip dim danger-text"));
+    body.append(meta, btns);
+    li.append(body);
+    return li;
+  }));
+  if (!qa.list.length) ul.append(el("li", "small qaNone", qa.open ? t("No questions yet. People ask from their phones, with the Questions button.") : t("Questions are closed.")));
+}
+
+function saveQuestions(title) {
+  if (!qa?.list.length) return toast(t("No questions yet"));
+  const status = { "": "", wait: t("Waiting for the host"), hi: t("On the screen now"), done: t("Answered") };
+  const rows = [[t("Question"), t("Asked by"), t("Votes"), t("Status")],
+    ...qaSorted(qa.list).map((x) => [x.text, x.name || t("Anonymous"), x.up.length, status[x.st]])];
+  const csv = "\ufeff" + rows.map((r) => r.map(csvCell).join(",")).join("\r\n");
+  downloadFile((title || "Ronda") + " - " + t("questions") + ".csv", csv, "text/csv");
+  toast(t("Questions saved to your downloads"));
 }
 
 function qr(text) {
@@ -1001,13 +1143,15 @@ function hostResults(q, m, asking) {
 }
 function hash(s) { let h = 0; for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) | 0; return h; }
 
+function csvCell(v) {
+  let s = String(v);
+  if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) s = "'" + s; // a name like "=HYPERLINK(...)" stays text
+  return /[",\n;]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
 function saveResults(m) {
   const qs = m.quiz.questions;
-  const esc = (v) => {
-    let s = String(v);
-    if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) s = "'" + s; // a name like "=HYPERLINK(...)" stays text
-    return /[",\n;]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-  };
+  const esc = csvCell;
   const rows = [[t("Name"), t("Points"), ...qs.map((q, i) => (i + 1) + ". " + q.text)]];
   const ranked = Object.entries(m.players).filter(([, p]) => !p.out).sort((a, b) => b[1].score - a[1].score);
   for (const [id, p] of ranked) {

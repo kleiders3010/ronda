@@ -105,6 +105,14 @@ try:
         ana.wait_for_function("document.getElementById('pScore').textContent.includes('points')", timeout=15000)
         s1 = score(ana)
         check("points" in s1 and not score(beto), f"question 1 played: Ana scores ({s1}), Beto doesn't")
+        ana.click("#pQa")
+        ana.fill("#askForm textarea[name=ask]", "Will we get the slides?")
+        ana.click("#askForm button[name=sendAsk]")
+        beto.click("#pQa")
+        beto.wait_for_selector("#pQaList button[name=vote]", timeout=15000)
+        beto.click("#pQaList button[name=vote]")
+        h.wait_for_function("document.getElementById('hQa').textContent.includes('1')", timeout=15000)
+        h.wait_for_timeout(1700)  # the host's copy is written every 1.5 s
 
         # its server dies in the middle of the game
         down(0)
@@ -115,6 +123,11 @@ try:
         check(True, f"the server dies: the host's screen moves the ronda to the other one ({time.time() - t0:.0f} s)")
         ana.wait_for_function("document.getElementById('pScore').textContent.includes('points')", timeout=30000)
         check(score(ana) == s1, f"Ana's points came along ({score(ana)})")
+        beto.wait_for_function("document.querySelector('#pQaList')?.innerText.includes('slides')", timeout=30000)
+        check(beto.get_attribute("#pQaList button[name=vote]", "aria-pressed") == "true" and "1" in beto.inner_text("#pQaList button[name=vote]"),
+              "the audience question and Beto's vote came along")
+        beto.click("#pQaClose")
+        ana.click("#pQaClose")
         caro = join(code, "Caro")  # joins late, while the first server is still down
         h.wait_for_function("document.getElementById('hInfo').textContent.includes('3 ')", timeout=30000)
         check(True, "someone joining now finds the ronda on the other server")

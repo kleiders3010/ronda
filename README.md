@@ -14,6 +14,10 @@ their phone with a short code. No account, no player limit, nothing to install, 
   add other spellings that count. The screen shows the answer and what people typed.
 - **Put in order**: everyone gets the same items mixed up and taps them back in order; only the full right order
   scores.
+- **Audience questions** (like Slido's Q&A), any time during a ronda: people ask the host from their phone, with
+  their name or anonymously, and upvote each other's questions (popular or recent first). The host shows one on the
+  big screen, marks it answered or deletes it, can approve each question before anyone sees it, can close questions,
+  and can save them as a spreadsheet. `python worker/qa_test.py`.
 - Download the results as a spreadsheet (CSV). Share a ronda as a link: the whole quiz travels inside the link.
 - Send feedback (start page and the big screen): a problem or an idea, an optional email for an answer and, if you keep the tick, technical details (browser, page, errors; never quiz content or names). "See what's sent" shows it all first. Emailed to hello@jurisgames.com through [jurisgames-feedback](https://github.com/kleiders3010/jurisgames-feedback), which stores nothing.
 
