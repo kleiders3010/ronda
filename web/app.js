@@ -560,7 +560,7 @@ function playScreen(code, name) {
     if (m.t === "qa-closed") return toast(t("The host closed questions for now"));
     if (m.t !== "view") return;
     $("#pName").textContent = m.name;
-    $("#pScore").textContent = m.score ? t("{n} points", { n: m.score }) : "";
+    $("#pScore").textContent = m.score || (m.phase !== "lobby" && m.phase !== "question" && scored(m.kind)) ? t("{n} points", { n: m.score || 0 }) : "";
     // keep a half-typed word when only the count changed
     const key = [m.phase, m.qi, JSON.stringify(m.mine)].join("|");
     if (key === lastKey) return;
@@ -646,7 +646,7 @@ function playerView(m) {
   }
   if (m.phase === "end") {
     out.push(el("p", "big-ok", t("Finished!")));
-    if (m.quizzy) out.push(el("p", "wait", t("You came {rank} of {of} with {n} points", { rank: ordinal(m.rank), of: m.of, n: m.score })));
+    if (m.quizzy) out.push(el("p", "place", t("{rank} of {of}", { rank: ordinal(m.rank), of: m.of })));
     else out.push(el("p", "wait", t("Thanks for taking part")));
     out.push(homeLink());
     return out;
@@ -696,7 +696,7 @@ function playerView(m) {
       if (m.mine != null) out.push(orderList(m.answers, m.mine), el("p", "wait", t("Sent. Wait for the others.")));
       else out.push(...orderPicker(m));
     } else if (m.kind === "scale") {
-      if (m.mine != null) out.push(el("p", "big-ok", String(m.mine)), el("p", "wait", t("Sent. You can change it until the results.")));
+      if (m.mine != null) out.push(el("p", "wait", t("Sent. You can change it until the results.")));
       const row = el("div", "scale");
       for (let v = 1; v <= 5; v++) {
         const b = el("button", "sv" + (m.mine === v ? " on" : ""), String(v));
@@ -722,7 +722,7 @@ function playerView(m) {
         f.onsubmit = (e) => { e.preventDefault(); if (inp.value.trim()) live.send({ t: "answer", qi: m.qi, v: inp.value }); };
         out.push(f);
         setTimeout(() => inp.focus(), 50);
-      } else out.push(el("p", "wait", t("Sent. Look at the screen.")));
+      } else out.push(el("p", "wait", t("Sent.")));
     }
     return out;
   }
@@ -731,11 +731,12 @@ function playerView(m) {
     if (m.mine == null) out.push(el("p", "big-no", t("No answer this time")));
     else if (m.right) out.push(el("p", "big-ok", t("Right!")), el("p", "gain", "+" + m.gained));
     else out.push(el("p", "big-no", t("Not this time")));
-    if (m.kind === "quiz" && m.answers) {
+    if (m.kind === "quiz" && m.answers && !m.right) {
+      if (m.mine != null) out.push(el("p", "said", t("You said {a}", { a: LETTERS[m.mine] + ": " + m.answers[m.mine] })));
       const right = m.correct.map((j) => LETTERS[j] + ": " + m.answers[j]).join(" · ");
       out.push(el("p", "wait", t("Right answer: {a}", { a: right })));
     }
-    if (m.kind === "type" && m.correct) out.push(el("p", "wait", t("Right answer: {a}", { a: m.correct[0] })));
+    if (m.kind === "type" && m.correct && !m.right) out.push(el("p", "wait", t("Right answer: {a}", { a: m.correct[0] })));
     if (m.kind === "order" && m.answers) out.push(el("p", "wait", t("The right order:")), orderList(m.answers, m.answers.map((_, i) => i)));
     out.push(el("p", "place", t("You're {rank}", { rank: ordinal(m.rank) })));
   } else {
@@ -978,7 +979,7 @@ function renderHost(code, m, fresh) {
   const q = m.qi >= 0 ? qs[m.qi] : null;
   const next = $("#hNext");
   const active = m.players.length;
-  $("#hInfo").textContent = t("Code {code}", { code: fmtCode(code) }) + " · " + t("{n} people", { n: active });
+  $("#hInfo").textContent = m.phase === "lobby" ? "" : t("Code {code}", { code: fmtCode(code) }) + " · " + t("{n} people", { n: active });
 
   if (m.phase === "lobby") {
     next.textContent = t("Start");
@@ -1064,7 +1065,7 @@ function renderHost(code, m, fresh) {
     wrap.append(el("div", "res"));
     main.replaceChildren(wrap);
   }
-  main.querySelector(".answered").textContent = t("{a} of {n} answered", { a: m.answered, n: active });
+  main.querySelector(".answered").textContent = asking ? t("{a} of {n} answered", { a: m.answered, n: active }) : "";
   const res = main.querySelector(".res");
   res.replaceChildren(...hostResults(q, m, asking));
 }
@@ -1126,7 +1127,10 @@ function hostResults(q, m, asking) {
       col.append(el("span", "bc", String(c)), bar, el("span", "bl", String(i + 1)));
       bars.append(col);
     });
-    box.append(el("p", "avg", r?.avg != null ? t("Average {v}", { v: r.avg.toFixed(1).replace(".", LANG === "es" ? "," : ".") }) : t("Waiting for answers…")), bars);
+    const ends = el("div", "scaleEnds");
+    ends.append(el("span", "", t("Not at all")), el("span", "", t("A lot")));
+    box.append(el("p", "avg", r?.avg != null ? t("Average {v}", { v: r.avg.toFixed(1).replace(".", LANG === "es" ? "," : ".") }) : t("Waiting for answers…")), el("div", "barsWrap"));
+    box.lastChild.append(bars, ends);
     return [box];
   }
   const cloud = el("div", "cloud");

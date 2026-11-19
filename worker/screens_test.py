@@ -1,6 +1,7 @@
 # Short screens: a host on a 1280x720 laptop (or projector) and players on a phone held sideways (740x360) and
 # upright (360x640), with a long question and six long answers, then four. Checked: the host sees the question, all four
-# answers and the Next button without scrolling; a player can reach (and tap) every answer.
+# answers and the Next button without scrolling; a player can reach (and tap) every answer; every button anyone sees
+# has text that stands out from what's behind it (the players' Questions button was once white on white).
 #   python worker/screens_test.py [site]
 import sys
 sys.stdout.reconfigure(encoding='utf-8')
@@ -24,6 +25,20 @@ def check(ok, what):
 
 IN_VIEW = """(sel) => [...document.querySelectorAll(sel)].map(e => { const r = e.getBoundingClientRect();
   return r.top >= 0 && r.bottom <= innerHeight + 1 && r.left >= 0 && r.right <= innerWidth + 1; })"""
+# each visible button with text: contrast of its text colour against the first solid background behind it
+CONTRAST = """() => { const rgb = (c) => (c.match(/[\d.]+/g) || []).map(Number);
+  const lum = ([r, g, b]) => { const f = (v) => { v /= 255; return v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4 }; return .2126 * f(r) + .7152 * f(g) + .0722 * f(b) };
+  const out = [];
+  for (const e of document.querySelectorAll('button, .btn')) {
+    const r = e.getBoundingClientRect(), txt = e.textContent.trim();
+    if (!txt || !r.width || !r.height || getComputedStyle(e).visibility === 'hidden') continue;
+    let bg = null;
+    for (let x = e; x; x = x.parentElement) { const c = rgb(getComputedStyle(x).backgroundColor); if (c.length === 3 || c[3] > .5) { bg = c; break } }
+    const a = lum(rgb(getComputedStyle(e).color)), b = lum(bg || [255, 255, 255]);
+    const k = (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
+    if (k < 3) out.push(txt.slice(0, 20) + ' ' + k.toFixed(1));
+  }
+  return out }"""
 REACH = """(sel) => [...document.querySelectorAll(sel)].map(e => { e.scrollIntoView({block: 'nearest'}); const r = e.getBoundingClientRect();
   const x = r.left + r.width / 2, y = r.top + r.height / 2; const hit = document.elementFromPoint(x, y);
   return !!hit && (hit === e || e.contains(hit)); })"""
@@ -62,6 +77,10 @@ with sync_playwright() as p:
             pl.wait_for_timeout(500)
             r = pl.evaluate(REACH, ".pa")
             check(len(r) == n and all(r), f"{w}x{ht} player: all {n} answers can be reached and tapped ({r})")
+            low = pl.evaluate(CONTRAST)
+            check(not low, f"{w}x{ht} player: every button's text stands out from its background ({low})")
+        low = h.evaluate(CONTRAST)
+        check(not low, f"1280x720 host: every button's text stands out from its background ({low})")
         if n == 6:
             h.click("#hNext")  # results
             h.wait_for_selector(".ha.right", timeout=30000)
