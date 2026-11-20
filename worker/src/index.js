@@ -11,7 +11,7 @@
 const MAX_PLAYERS = 500;
 const MAX_MSG = 256 * 1024; // a whole quiz arrives in one message
 const ROOM_TTL = 6 * 3600 * 1000;
-const KINDS = ["quiz", "poll", "words", "scale", "type", "order"];
+const KINDS = ["quiz", "poll", "words", "scale", "type", "order", "slider"];
 const MAX_ANSWERS = 6;
 // audience questions (like Slido's Q&A): people ask the host, everyone upvotes
 const MAX_QA = 100;
@@ -38,13 +38,20 @@ export function cleanQa(x, players) {
   return qa;
 }
 // kinds with a right answer: points, ranking, podium
-export const scored = (kind) => kind === "quiz" || kind === "type" || kind === "order";
+export const scored = (kind) => kind === "quiz" || kind === "type" || kind === "order" || kind === "slider";
+// Kahoot's Slider (help 'Kahoot! question types'): a number between min and max; answers within the margin count
+// (none: only the right number ... maximum: every answer), and the closer, the more points (80% precision, 20% speed).
+// The margin is a part of the range: none, low, medium, high, maximum.
+export const MARGINS = [0, 0.05, 0.1, 0.2, 1];
+export const sliderTol = (q) => MARGINS[q.margin ?? 2] * (q.max - q.min);
+const near = (q, v) => typeof v === "number" && Number.isFinite(v) && Math.abs(v - q.ans) <= sliderTol(q) + 1e-9 * (1 + Math.abs(q.ans));
 // a typed answer counts when it matches one of the accepted ones, ignoring case, accents, spaces and punctuation
 export const norm = (s) => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 export function isRight(q, v) {
   if (q.kind === "quiz") return q.correct.includes(v);
   if (q.kind === "type") return typeof v === "string" && !!norm(v) && q.accept.some((a) => norm(a) === norm(v));
   if (q.kind === "order") return Array.isArray(v) && v.length === q.answers.length && v.every((x, i) => x === i);
+  if (q.kind === "slider") return near(q, v);
   return false;
 }
 // "Put in order": everyone sees the same mix, never already in order
@@ -132,6 +139,9 @@ export function cleanSnap(s, host) {
         if (str(v, 60)) row[id] = str(v, 60);
       } else if (kind === "order") {
         if (isPerm(v, quiz.questions[i].answers.length)) row[id] = v;
+      } else if (kind === "slider") {
+        const s = quiz.questions[i];
+        if (typeof v === "number" && v >= s.min && v <= s.max) row[id] = v;
       } else if (Number.isInteger(v)) row[id] = v;
     }
     log[i] = row;
@@ -171,6 +181,19 @@ export function cleanQuiz(q) {
       out.answers = (Array.isArray(x.answers) ? x.answers : []).map((a) => str(a?.text ?? a, 120)).filter(Boolean).slice(0, MAX_ANSWERS);
       if (out.answers.length < 2) continue;
     }
+    if (kind === "slider") {
+      const num = (v) => {
+        const n = v === "" || v == null ? NaN : Number(v);
+        return Number.isFinite(n) && Math.abs(n) <= 1e9 ? Math.round(n * 100) / 100 : null;
+      };
+      const min = num(x.min), max = num(x.max), ans = num(x.ans);
+      if (min == null || max == null || ans == null || min >= max || ans < min || ans > max) continue;
+      Object.assign(out, { min, max, ans, dec: Math.max(decOf(min), decOf(max), decOf(ans)) });
+      const m = Number(x.margin);
+      out.margin = Number.isInteger(m) && m >= 0 && m <= 4 ? m : 2;
+      const unit = str(x.unit, 20);
+      if (unit) out.unit = unit;
+    }
     if (kind === "quiz" || kind === "poll") {
       const answers = (Array.isArray(x.answers) ? x.answers : []).map((a) => str(a?.text ?? a, 120)).slice(0, MAX_ANSWERS);
       const keep = answers.map((a, i) => [a, i]).filter(([a]) => a);
@@ -193,11 +216,22 @@ export function cleanQuiz(q) {
   return { title: str(q.title, 120) || "Ronda", questions };
 }
 
-export function points(q, elapsedMs) {
+// digits after the point a number needs (up to 2): the slider moves in steps of that size
+const decOf = (n) => (String(n).split(".")[1] || "").length;
+
+export function points(q, elapsedMs, v) {
   const limit = (q.time || 20) * 1000;
   const f = Math.min(1, Math.max(0, elapsedMs / limit));
+  if (q.kind === "slider") {
+    const tol = sliderTol(q);
+    const close = tol ? Math.max(0, 1 - Math.abs(v - q.ans) / tol) : 1;
+    return Math.round(1000 * (q.pts ?? 1) * (0.8 * close + 0.2 * (1 - f)));
+  }
   return Math.round(1000 * (q.pts ?? 1) * (1 - f / 2));
 }
+
+// what a phone needs to show a slider (never the right number while asking)
+const rangeOf = (q) => (q.kind === "slider" ? { min: q.min, max: q.max, dec: q.dec, unit: q.unit || "" } : null);
 
 export class Room {
   constructor(state) {
@@ -407,7 +441,7 @@ export class Room {
     if (scored(q.kind)) {
       for (const [id, a] of Object.entries(g.ans)) {
         if (isRight(q, a.v)) {
-          const pts = points(q, Math.max(0, a.at - g.startedAt - 1500));
+          const pts = points(q, Math.max(0, a.at - g.startedAt - 1500), a.v);
           g.gained[id] = pts;
           if (g.players[id]) g.players[id].score += pts;
         }
@@ -446,6 +480,11 @@ export class Room {
       if (g.ans[id]) return;
       v = str(msg.v, 60);
       if (!v) return;
+    } else if (q.kind === "slider") {
+      if (g.ans[id]) return;
+      v = typeof msg.v === "number" ? msg.v : NaN;
+      if (!Number.isFinite(v) || v < q.min || v > q.max) return;
+      v = Math.round(v * 10 ** q.dec) / 10 ** q.dec;
     } else if (q.kind === "order") {
       if (g.ans[id]) return;
       v = Array.isArray(msg.v) ? msg.v.map(Number) : null;
@@ -488,6 +527,10 @@ export class Room {
         top: [...by.values()].sort((a, b) => b.n - a.n).slice(0, 12).map((e) => [e.text, e.n, e.ok]) };
     }
     if (q.kind === "order") return { right: vals.filter((v) => isRight(q, v)).length, total: vals.length };
+    if (q.kind === "slider") {
+      return { right: vals.filter((v) => isRight(q, v)).length, total: vals.length, vals: vals.slice(0, MAX_PLAYERS),
+        avg: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null };
+    }
     if (q.kind === "scale") {
       const counts = [0, 0, 0, 0, 0];
       for (const v of vals) counts[v - 1]++;
@@ -622,13 +665,13 @@ export class Room {
     const mine = g.ans[id]?.v ?? null;
     if (g.phase === "question") {
       return { ...base, qi: g.qi, n, kind: q.kind, pts: q.pts ?? 1, text: q.text, answers: q.answers || null, mine,
-        shuf: q.kind === "order" ? g.shuf : null,
+        shuf: q.kind === "order" ? g.shuf : null, range: rangeOf(q),
         endsIn: g.endsAt ? g.endsAt - Date.now() : 0, readIn: Math.max(0, g.startedAt + 1500 - Date.now()) };
     }
     const rank = this.ranking().findIndex((r) => r.id === id) + 1;
     if (g.phase === "end") return { ...base, rank, of: this.ranking().length, quizzy: g.quiz.questions.some((x) => scored(x.kind)) };
     return { ...base, qi: g.qi, n, kind: q.kind, pts: q.pts ?? 1, streak: p.streak || 0, text: q.text, answers: q.answers || null, mine,
-      correct: q.kind === "quiz" ? q.correct : q.kind === "type" ? q.accept : null,
+      correct: q.kind === "quiz" ? q.correct : q.kind === "type" ? q.accept : q.kind === "slider" ? q.ans : null, range: rangeOf(q),
       right: scored(q.kind) && mine != null ? isRight(q, mine) : null, gained: g.gained?.[id] || 0, rank };
   }
 

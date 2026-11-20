@@ -103,6 +103,8 @@ with sync_playwright() as p:
     a1 = score(pl["Ana"])
     check(1000 < a1 <= 2000, f"Ana gets more than 1000 on a double question ({a1})")
     check(pl["Ana"].locator(".streak").count() == 0, "no streak shown after one right answer")
+    check(pl["Ana"].locator(".big-no").count() == 0, "a right answer never also says 'Not this time'")
+    check(pl["Beto"].locator(".big-no").count() == 1 and pl["Beto"].locator(".big-ok").count() == 0, "a wrong one says it once")
     h.click("#hNext")
     h.wait_for_selector(".board", timeout=15000)
 

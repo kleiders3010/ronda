@@ -290,3 +290,27 @@ div.typed .chip.ok { outline: 2px solid #86efac; }
 .hAnswers.pics .ha .aimg { flex: 1 1 0; min-width: 0; height: 100%; max-height: 100%; object-fit: contain; }
 .hAnswers.pics .ha .atext { flex: 0 1 auto; }
 .hAnswers.pics .ha .atext:empty { display: none; }
+
+/* Slider (Kahoot's): the editor's fields, the phone's slider, the big screen's scale */
+.slideEdit { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.slideEdit .unit, .slideEdit .margin { grid-column: span 3; }
+.nfield { display: flex; flex-direction: column; justify-content: flex-end; gap: 4px; min-width: 0; }
+.nfield input, .nfield select { min-width: 0; width: 100%; }
+.nfield.rightN input { outline: 2px solid #16a34a; }
+@media (min-width: 520px) { .slideEdit .unit, .slideEdit .margin { grid-column: span 1; } .slideEdit { grid-template-columns: repeat(3, 1fr); } .slideEdit .margin { grid-column: span 2; } }
+.slide { display: flex; flex-direction: column; gap: 14px; }
+.sval { font-size: 44px; font-weight: 900; text-align: center; }
+.srow { display: flex; gap: 10px; align-items: center; }
+.srow input[type=range] { flex: 1; min-width: 0; accent-color: #a78bfa; height: 44px; padding: 0; background: transparent; border: 0; }
+.nudge { flex: none; width: 48px; height: 48px; border-radius: 50%; background: var(--night2); border: 2px solid #4c4475; color: #fff; font-size: 26px; font-weight: 800; }
+.slideRes { display: flex; flex-direction: column; align-items: center; gap: 1.5vh; flex: 1; justify-content: flex-end; text-align: center; }
+.slideRes .small { font-size: clamp(16px, 1.8vw, 26px); color: #d6d1f0; margin: 0; }
+.trackWrap { width: 100%; display: flex; flex-direction: column; gap: 1vh; padding: 0 2vw; }
+.trackWrap .scaleEnds { font-size: clamp(16px, 1.8vw, 26px); }
+.track { position: relative; height: 14px; border-radius: 7px; background: #4c4475; margin-top: 16vh; }
+.track .band { position: absolute; top: -6px; bottom: -6px; background: rgba(134, 239, 172, .35); border-radius: 8px; }
+.track .dot { position: absolute; top: 50%; width: clamp(16px, 1.8vw, 26px); aspect-ratio: 1; margin: calc(clamp(16px, 1.8vw, 26px) / -2) 0 0 calc(clamp(16px, 1.8vw, 26px) / -2); border-radius: 50%; background: #fbbf24; border: 2px solid var(--night, #1d1640); transform: translateY(calc((var(--h, 0) + 1) * clamp(-28px, -2vw, -18px))); }
+.track .dot.ok { background: #86efac; }
+.track .mark { position: absolute; top: -14px; bottom: -14px; width: 6px; margin-left: -3px; border-radius: 3px; background: #fff; left: var(--to); animation: slideIn 1.4s cubic-bezier(.3, 1.4, .5, 1); }
+@keyframes slideIn { from { left: 0; } }
+@media (prefers-reduced-motion: reduce) { .track .mark { animation: none; } }

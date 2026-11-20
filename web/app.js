@@ -16,14 +16,26 @@ const el = (tag, cls, text) => {
 };
 const LETTERS = ["A", "B", "C", "D", "E", "F"];
 const MAX_ANSWERS = 6; // the server keeps up to this many (worker/src/index.js)
-const KIND_NAME = { quiz: "Quiz", poll: "Poll", words: "Words", scale: "Scale", type: "Type answer", order: "Put in order" };
+const KIND_NAME = { quiz: "Quiz", poll: "Poll", words: "Words", scale: "Scale", type: "Type answer", order: "Put in order", slider: "Slider" };
 // kinds with a right answer (points, ranking); the same rules as the server's (worker/src/index.js)
-const scored = (k) => k === "quiz" || k === "type" || k === "order";
+const scored = (k) => k === "quiz" || k === "type" || k === "order" || k === "slider";
+// Kahoot's Slider: the margin is a part of the range (none, low, medium, high, maximum); the same as the server's
+const MARGINS = [0, 0.05, 0.1, 0.2, 1];
+const MARGIN_NAME = ["None (only the exact number)", "Low", "Medium", "High", "Maximum (every answer)"];
+const sliderTol = (q) => MARGINS[q.margin ?? 2] * (q.max - q.min);
+// a number as people read it: up to the slider's decimals (all of them with fixed), thousands grouped only from 10 000
+// (a year stays 1969)
+function fmtNum(v, dec = 0, unit = "", fixed = false) {
+  const s = Number(v).toLocaleString(LANG === "es" ? "es-AR" : "en-US", { minimumFractionDigits: fixed ? dec : 0, maximumFractionDigits: dec,
+    useGrouping: Math.abs(v) >= 10000 });
+  return unit ? s + " " + unit : s;
+}
 const norm = (s) => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 function isRight(q, v) {
   if (q.kind === "quiz") return q.correct.includes(v);
   if (q.kind === "type") return typeof v === "string" && !!norm(v) && q.accept.some((a) => norm(a) === norm(v));
   if (q.kind === "order") return Array.isArray(v) && v.length === q.answers.length && v.every((x, i) => x === i);
+  if (q.kind === "slider") return typeof v === "number" && Math.abs(v - q.ans) <= sliderTol(q) + 1e-9 * (1 + Math.abs(q.ans));
   return false;
 }
 const fmtCode = (c) => c.slice(0, 3) + " " + c.slice(3);
@@ -98,6 +110,7 @@ function newQuestion(kind) {
   if (kind === "quiz" || kind === "poll" || kind === "order") q.answers = ["", "", "", ""];
   if (kind === "type") q.accept = ["", "", "", ""];
   if (kind === "quiz") q.correct = [0];
+  if (kind === "slider") Object.assign(q, { min: 0, max: 100, ans: "", margin: 2 });
   return q;
 }
 function blankQuiz() {
@@ -326,11 +339,14 @@ function renderQuestions() {
     text.maxLength = 300;
     text.placeholder = { quiz: t("Ask a question with a right answer"), poll: t("Ask what people think"),
       words: t("Ask for a word or two"), scale: t("Ask for a rating from 1 to 5"),
-      type: t("Ask a question people answer by typing"), order: t("Ask people to put things in order") }[q.kind];
+      type: t("Ask a question people answer by typing"), order: t("Ask people to put things in order"),
+      slider: t("Ask for a number (a year, a price, an amount)") }[q.kind];
     text.value = q.text;
     text.oninput = () => { q.text = text.value; touch(); };
     li.append(head, text, picEdit(q, li));
-    if (q.kind === "type") {
+    if (q.kind === "slider") {
+      li.append(...sliderEdit(q));
+    } else if (q.kind === "type") {
       const grid = el("div", "answersEdit");
       q.accept.forEach((a, j) => {
         const row = el("div", "aedit c" + j);
@@ -393,6 +409,64 @@ function renderQuestions() {
   });
 }
 
+// Kahoot's Slider (help 'Kahoot! question types'): from, to, the right number, a unit, the answer margin
+function sliderEdit(q) {
+  const box = el("div", "slideEdit");
+  const hint = el("p", "small hint slideHint");
+  const ok = () => [q.min, q.max, q.ans].every((v) => typeof v === "number") && q.min < q.max && q.ans >= q.min && q.ans <= q.max;
+  const say = () => {
+    if (!ok()) return (hint.textContent = t("People move a slider to their guess. The closer, the more points."));
+    const dec = Math.max(...[q.min, q.max, q.ans].map((v) => (String(v).split(".")[1] || "").length));
+    const tol = sliderTol(q);
+    // the guesses that count, in the slider's own steps
+    const st = 10 ** dec, lo = Math.ceil((q.ans - tol) * st - 1e-6) / st, hi = Math.floor((q.ans + tol) * st + 1e-6) / st;
+    hint.textContent = !tol ? t("Only {a} gets points.", { a: fmtNum(q.ans, dec, q.unit) })
+      : t("From {a} to {b} gets points, the closer the more.", { a: fmtNum(Math.max(q.min, lo), dec, q.unit), b: fmtNum(Math.min(q.max, hi), dec, q.unit) });
+  };
+  const num = (key, label) => {
+    const lab = el("label", "nfield");
+    const inp = el("input");
+    inp.type = "number";
+    inp.step = "any";
+    inp.inputMode = "decimal";
+    inp.name = key;
+    inp.value = q[key] ?? "";
+    inp.oninput = () => {
+      const v = inp.value.trim() === "" ? "" : Math.round(Number(inp.value) * 100) / 100;
+      q[key] = Number.isFinite(v) ? v : "";
+      touch();
+      say();
+    };
+    lab.append(el("span", "small", t(label)), inp);
+    return lab;
+  };
+  const right = num("ans", "Right answer");
+  right.classList.add("rightN");
+  box.append(num("min", "From"), num("max", "To"), right);
+  const unit = el("label", "nfield unit");
+  const u = el("input");
+  u.maxLength = 20;
+  u.name = "unit";
+  u.placeholder = t("Unit (optional)");
+  u.value = q.unit || "";
+  u.oninput = () => { if (u.value.trim()) q.unit = u.value; else delete q.unit; touch(); say(); };
+  unit.append(el("span", "small", t("Unit")), u);
+  const mrow = el("label", "nfield margin");
+  const sel = el("select");
+  sel.name = "margin";
+  MARGIN_NAME.forEach((n, i) => {
+    const o = el("option", "", t(n));
+    o.value = i;
+    sel.append(o);
+  });
+  sel.value = q.margin ?? 2;
+  sel.onchange = () => { q.margin = Number(sel.value); touch(); say(); };
+  mrow.append(el("span", "small", t("Answer margin")), sel);
+  box.append(unit, mrow);
+  say();
+  return [box, hint];
+}
+
 // Kahoot's "Points" (help 'How points work'): standard (up to 1000), double (up to 2000) or none
 const PTS_NAME = { 1: "Standard points", 2: "Double points", 0: "No points" };
 function pointsPicker(q) {
@@ -423,6 +497,11 @@ function problems(q) {
   for (const [i, x] of q.questions.entries()) {
     if (!x.text.trim()) return t("Question {n} has no text", { n: i + 1 });
     if (x.answers && x.answers.filter((a, j) => a.trim() || x.aimg?.[j]).length < 2) return t("Question {n} needs at least 2 answers", { n: i + 1 });
+    if (x.kind === "slider") {
+      if (![x.min, x.max].every((v) => typeof v === "number") || x.min >= x.max) return t("Question {n}: 'From' must be less than 'To'", { n: i + 1 });
+      if (typeof x.ans !== "number") return t("Question {n} needs the right answer", { n: i + 1 });
+      if (x.ans < x.min || x.ans > x.max) return t("Question {n}: the right answer must be between 'From' and 'To'", { n: i + 1 });
+    }
     if (x.kind === "type" && !x.accept.some((a) => norm(a))) return t("Question {n} needs the right answer", { n: i + 1 });
     if (x.kind === "quiz" && !x.correct.some((j) => x.answers[j]?.trim() || x.aimg?.[j])) return t("Question {n}: tap ✓ on the right answer", { n: i + 1 });
   }
@@ -677,7 +756,7 @@ function countdown(node, endsIn, readIn, onEnd) {
     if (node.isConnected) {
       node.style.setProperty("--f", Math.max(0, Math.min(1, left / total)));
       const s = node.querySelector(".secs");
-      if (s) s.textContent = Math.max(0, Math.ceil(left / 1000));
+      if (s) s.textContent = Math.max(0, Math.ceil(Math.min(left, total) / 1000)); // never more than the question's time
     }
     if (left > 0 && node.isConnected) timerRaf = requestAnimationFrame(tick);
     else if (left <= 0 && onEnd) onEnd();
@@ -853,6 +932,10 @@ function playerView(m) {
     } else if (m.kind === "order") {
       if (m.mine != null) out.push(orderList(m.answers, m.mine), el("p", "wait", t("Sent. Wait for the others.")));
       else out.push(...orderPicker(m));
+    } else if (m.kind === "slider") {
+      const r = m.range;
+      if (m.mine != null) out.push(el("p", "typed", fmtNum(m.mine, r.dec, r.unit)), el("p", "wait", t("Sent. Wait for the others.")));
+      else out.push(sliderPick(m));
     } else if (m.kind === "scale") {
       if (m.mine != null) out.push(el("p", "wait", t("Sent. You can change it until the results.")));
       const row = el("div", "scale");
@@ -890,13 +973,19 @@ function playerView(m) {
     else if (m.right) {
       out.push(el("p", "big-ok", t("Right!")));
       if (m.pts !== 0) out.push(el("p", "gain", "+" + m.gained));
-    }
-    if (m.streak >= 2) out.push(el("p", "streak", "🔥 " + t("Answer streak {n}", { n: m.streak })));
-    else out.push(el("p", "big-no", t("Not this time")));
+      if (m.streak >= 2) out.push(el("p", "streak", "🔥 " + t("Answer streak {n}", { n: m.streak })));
+    } else out.push(el("p", "big-no", t("Not this time")));
     if (m.kind === "quiz" && m.answers && !m.right) {
       if (m.mine != null) out.push(el("p", "said", t("You said {a}", { a: withLetter(m.answers, m.mine) })));
       const right = m.correct.map((j) => withLetter(m.answers, j)).join(" · ");
       out.push(el("p", "wait", t("Right answer: {a}", { a: right })));
+    }
+    if (m.kind === "slider" && m.range) {
+      const r = m.range;
+      out.push(el("p", "wait", t("Right answer: {a}", { a: fmtNum(m.correct, r.dec, r.unit) })));
+      if (m.mine != null && m.mine !== m.correct) {
+        out.push(el("p", "said", t("You said {a} ({d} off)", { a: fmtNum(m.mine, r.dec, r.unit), d: fmtNum(Math.abs(m.mine - m.correct), r.dec) })));
+      }
     }
     if (m.kind === "type" && m.correct && !m.right) out.push(el("p", "wait", t("Right answer: {a}", { a: m.correct[0] })));
     if (m.kind === "order" && m.answers) out.push(el("p", "wait", t("The right order:")), orderList(m.answers, m.answers.map((_, i) => i)));
@@ -950,6 +1039,49 @@ function orderList(answers, seq) {
   const ol = el("ol", "orderList");
   for (const i of seq) ol.append(el("li", "", answers[i]));
   return ol;
+}
+
+// the phone's slider: starts in the middle; drag it, or − / + (and the keyboard's arrows and page keys) for one step
+function sliderPick(m) {
+  const r = m.range;
+  const step = 10 ** -r.dec;
+  const snap = (v) => Math.min(r.max, Math.max(r.min, Math.round(v / step) * step));
+  const box = el("div", "slide");
+  const val = el("output", "sval");
+  const range = el("input");
+  range.type = "range";
+  range.name = "slider";
+  range.min = r.min;
+  range.max = r.max;
+  range.step = step;
+  range.value = snap((r.min + r.max) / 2);
+  range.setAttribute("aria-label", t("Your answer"));
+  const show = () => {
+    val.textContent = fmtNum(Number(range.value), r.dec, r.unit, true); // fixed decimals: the number does not jump while sliding
+    range.style.setProperty("--p", (Number(range.value) - r.min) / (r.max - r.min));
+  };
+  range.oninput = show;
+  const nudge = (d) => { range.value = snap(Number(range.value) + d * step); show(); };
+  const less = el("button", "nudge", "−");
+  less.type = "button";
+  less.setAttribute("aria-label", t("Less"));
+  less.onclick = () => nudge(-1);
+  const more = el("button", "nudge", "+");
+  more.type = "button";
+  more.setAttribute("aria-label", t("More"));
+  more.onclick = () => nudge(1);
+  const row = el("div", "srow");
+  row.append(less, range, more);
+  const ends = el("div", "scaleEnds small");
+  ends.append(el("span", "", fmtNum(r.min, r.dec, r.unit)), el("span", "", fmtNum(r.max, r.dec, r.unit)));
+  const send = el("button", "btn primary", t("Send"));
+  send.onclick = () => {
+    for (const x of box.querySelectorAll("button, input")) x.disabled = true;
+    live.send({ t: "answer", qi: m.qi, v: snap(Number(range.value)) });
+  };
+  box.append(val, row, ends, send);
+  show();
+  return box;
 }
 
 function chosen(answers, j) {
@@ -1301,6 +1433,7 @@ function hostResults(q, m, asking) {
     if (!asking) out.unshift(el("p", "avg", t("{r} of {n} got the order right", { r: r?.right || 0, n: r?.total || 0 })));
     return out;
   }
+  if (q.kind === "slider") return [sliderRes(q, r, asking)];
   if (q.kind === "scale") {
     const counts = r?.counts || [0, 0, 0, 0, 0];
     const max = Math.max(1, ...counts);
@@ -1331,6 +1464,51 @@ function hostResults(q, m, asking) {
   }
   return [cloud];
 }
+// the big screen's slider: while asking, the empty scale; then every guess as a dot, the right number sliding into
+// place (like Kahoot's reveal) and the part that got points shaded
+function sliderRes(q, r, asking) {
+  const dec = q.dec ?? Math.max(...[q.min, q.max, q.ans].map((v) => (String(v).split(".")[1] || "").length));
+  const at = (v) => ((v - q.min) / (q.max - q.min)) * 100 + "%";
+  const box = el("div", "slideRes");
+  if (asking) box.append(el("p", "typeAsk", t("Move the slider on your phone")));
+  else {
+    box.append(el("p", "typeRight", fmtNum(q.ans, dec, q.unit)));
+    const n = r?.total || 0;
+    box.append(el("p", "avg", (q.margin ?? 2) === 0 ? t("{r} of {n} got it exactly", { r: r?.right || 0, n }) : t("{r} of {n} got close enough", { r: r?.right || 0, n })));
+    if (r?.avg != null) box.append(el("p", "small", t("Average guess: {v}", { v: fmtNum(r.avg, Math.min(2, dec + 1), q.unit) })));
+  }
+  const track = el("div", "track");
+  if (!asking) {
+    const tol = sliderTol(q);
+    if (tol) {
+      const band = el("div", "band");
+      band.style.left = at(Math.max(q.min, q.ans - tol));
+      band.style.right = (100 - parseFloat(at(Math.min(q.max, q.ans + tol)))) + "%";
+      track.append(band);
+    }
+    // a dot per guess; the same spot stacks upwards
+    const seen = new Map();
+    for (const v of r?.vals || []) {
+      const k = Math.round(((v - q.min) / (q.max - q.min)) * 100);
+      const h = seen.get(k) || 0;
+      seen.set(k, h + 1);
+      const d = el("span", "dot" + (isRight(q, v) ? " ok" : ""));
+      d.style.left = at(v);
+      d.style.setProperty("--h", Math.min(h, 8));
+      track.append(d);
+    }
+    const mark = el("span", "mark");
+    mark.style.setProperty("--to", at(q.ans));
+    track.append(mark);
+  }
+  const ends = el("div", "scaleEnds");
+  ends.append(el("span", "", fmtNum(q.min, dec, q.unit)), el("span", "", fmtNum(q.max, dec, q.unit)));
+  const wrap = el("div", "trackWrap");
+  wrap.append(track, ends);
+  box.append(wrap);
+  return box;
+}
+
 function hash(s) { let h = 0; for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) | 0; return h; }
 
 function csvCell(v) {
@@ -1350,6 +1528,7 @@ function saveResults(m) {
       if (v == null) return "";
       if (q.kind === "type") return v + (isRight(q, v) ? " ✓" : " ✗");
       if (q.kind === "order") return v.map((i) => q.answers[i]).join(" → ") + (isRight(q, v) ? " ✓" : " ✗");
+      if (q.kind === "slider") return fmtNum(v, q.dec ?? 2, q.unit).replace(/\u00a0/g, " ") + (isRight(q, v) ? " ✓" : " ✗");
       if (q.answers) return (q.answers[v] === PIC_ONLY ? LETTERS[v] : q.answers[v]) + (q.kind === "quiz" ? (q.correct.includes(v) ? " ✓" : " ✗") : "");
       return Array.isArray(v) ? v.join(" / ") : v;
     })]);

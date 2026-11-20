@@ -5,6 +5,7 @@
 # and restart them; the page comes from the Worker (wrangler dev).
 #   cd worker && npx wrangler dev --port 8788   then   python worker/failover_test.py
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -94,6 +95,10 @@ try:
         def score(pg):
             return pg.text_content("#pScore") or ""
 
+        def pts(pg):  # the number; a player who scored nothing sees "0 points" after a question
+            m = re.search(r"\d+", score(pg))
+            return int(m.group()) if m else 0
+
         # a normal start: the first server (an even code)
         h, code = host_start()
         check(side(code) == 0, f"a ronda starts on the first server (code {code}, even)")
@@ -104,7 +109,7 @@ try:
         answer(beto, 1)
         ana.wait_for_function("document.getElementById('pScore').textContent.includes('points')", timeout=15000)
         s1 = score(ana)
-        check("points" in s1 and not score(beto), f"question 1 played: Ana scores ({s1}), Beto doesn't")
+        check("points" in s1 and pts(beto) == 0, f"question 1 played: Ana scores ({s1}), Beto doesn't")
         ana.click("#pQa")
         ana.fill("#askForm textarea[name=ask]", "Will we get the slides?")
         ana.click("#askForm button[name=sendAsk]")
@@ -140,7 +145,7 @@ try:
         answer(beto, 1)
         answer(caro, 0)
         ana.wait_for_function(f"!document.getElementById('pScore').textContent.includes({s1!r})", timeout=20000)
-        check(score(ana) != s1 and "points" in score(beto) and not score(caro), f"question 2 played there: Ana {score(ana)}, Beto {score(beto)}, Caro none")
+        check(score(ana) != s1 and "points" in score(beto) and pts(caro) == 0, f"question 2 played there: Ana {score(ana)}, Beto {score(beto)}, Caro none")
         s2a, s2b = score(ana), score(beto)
 
         # the first server comes back: it is told the ronda moved (nobody is left in an old copy)

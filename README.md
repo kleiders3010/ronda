@@ -14,6 +14,11 @@ their phone with a short code. No account, no player limit, nothing to install, 
   add other spellings that count. The screen shows the answer and what people typed.
 - **Put in order**: everyone gets the same items mixed up and taps them back in order; only the full right order
   scores.
+- **Slider** (like Kahoot's, a paid type there): guess a number between From and To (a year, a price), with an
+  optional unit. The answer margin (none: only the exact number; low, medium, high: within a twentieth, a tenth or a fifth
+  of the range either way; maximum: every guess) says which guesses get points; the closer, the more (80% how close, 20% how fast). Phones get a slider
+  with − / + for one step (the keyboard's arrows work too); the big screen shows every guess as a dot and the right
+  number sliding into place. `python worker/slider_test.py`.
 - **Audience questions** (like Slido's Q&A), any time during a ronda: people ask the host from their phone, with
   their name or anonymously, and upvote each other's questions (popular or recent first). The host shows one on the
   big screen, marks it answered or deletes it, can approve each question before anyone sees it, can close questions,
