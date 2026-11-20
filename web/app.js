@@ -16,6 +16,11 @@ const el = (tag, cls, text) => {
 };
 const LETTERS = ["A", "B", "C", "D", "E", "F"];
 const MAX_ANSWERS = 6; // the server keeps up to this many (worker/src/index.js)
+// teams (like Kahoot's team mode): names and colours they start with; the host can rename them
+const TEAM_NAMES = ["Foxes", "Owls", "Bears", "Wolves", "Otters", "Hawks", "Deer", "Lynxes", "Seals", "Bees"];
+const TEAM_COLORS = ["#e11d48", "#2563eb", "#d97706", "#059669", "#7c3aed", "#0891b2", "#c026d3", "#65a30d", "#ea580c", "#475569"];
+const MAX_TEAMS = 10; // the server's (worker/src/index.js)
+const teamDot = (k) => { const d = el("span", "tdot"); d.style.background = TEAM_COLORS[k % TEAM_COLORS.length]; return d; };
 const KIND_NAME = { quiz: "Quiz", poll: "Poll", words: "Words", scale: "Scale", type: "Type answer", order: "Put in order", slider: "Slider" };
 // kinds with a right answer (points, ranking); the same rules as the server's (worker/src/index.js)
 const scored = (k) => k === "quiz" || k === "type" || k === "order" || k === "slider";
@@ -795,11 +800,24 @@ function playScreen(code, name) {
     if (m.t !== "view") return;
     $("#pName").textContent = m.name;
     $("#pScore").textContent = m.score || (m.phase !== "lobby" && m.phase !== "question" && scored(m.kind)) ? t("{n} points", { n: m.score || 0 }) : "";
+    $("#pTeam").replaceChildren(...(m.team ? [teamDot(m.team.k), m.team.name] : []));
+    $("#pTeam").hidden = !m.team;
     // keep a half-typed word when only the count changed
-    const key = [m.phase, m.qi, JSON.stringify(m.mine)].join("|");
+    const key = [m.phase, m.qi, JSON.stringify(m.mine), m.phase === "lobby" ? JSON.stringify([m.teams, m.team?.k]) : ""].join("|");
     if (key === lastKey) return;
     lastKey = key;
     main.replaceChildren(...playerView(m));
+    // team talk: the question and its answers show, answering opens when it is over
+    if (m.phase === "question" && m.talk && m.readIn > 300) {
+      const shut = [...main.querySelectorAll("button, input, select, textarea")].filter((x) => !x.disabled);
+      for (const x of shut) x.disabled = true;
+      main.classList.add("talking");
+      setTimeout(() => {
+        if (lastKey !== key) return;
+        main.classList.remove("talking");
+        for (const x of shut) x.disabled = false;
+      }, m.readIn - 300);
+    } else main.classList.remove("talking");
   });
   function endMsg(text) {
     closeLive();
@@ -876,11 +894,24 @@ function playerView(m) {
   const out = [];
   if (m.phase === "lobby") {
     out.push(el("p", "big-ok", t("You're in!")), el("p", "wait", t("Look at the screen. It starts soon.")));
+    if (m.teams) {
+      out.push(el("p", "place", t("Your team")));
+      const row = el("div", "teamPick");
+      m.teams.forEach((name, k) => {
+        const b = el("button", "btn tpick");
+        b.append(teamDot(k), name);
+        b.setAttribute("aria-pressed", String(m.team?.k === k));
+        b.onclick = () => live.send({ t: "team", team: k });
+        row.append(b);
+      });
+      out.push(row);
+    }
     return out;
   }
   if (m.phase === "end") {
     out.push(el("p", "big-ok", t("Finished!")));
-    if (m.quizzy) out.push(el("p", "place", t("{rank} of {of}", { rank: ordinal(m.rank), of: m.of })));
+    if (m.quizzy && m.team) out.push(el("p", "place", t("{team}: {rank} of {of}", { team: m.team.name, rank: ordinal(m.rank), of: m.of })));
+    else if (m.quizzy) out.push(el("p", "place", t("{rank} of {of}", { rank: ordinal(m.rank), of: m.of })));
     else out.push(el("p", "wait", t("Thanks for taking part")));
     out.push(homeLink());
     return out;
@@ -890,6 +921,7 @@ function playerView(m) {
   if (tag) prog.append(" ", tag);
   out.push(prog);
   out.push(el("h2", "ptext", m.text));
+  if (m.phase === "question" && m.talk && m.readIn > 300) out.push(el("p", "talkNote", t("Team talk: decide together")));
   if (m.phase === "question") {
     if (m.endsIn) {
       const tb = timerBar();
@@ -989,7 +1021,10 @@ function playerView(m) {
     }
     if (m.kind === "type" && m.correct && !m.right) out.push(el("p", "wait", t("Right answer: {a}", { a: m.correct[0] })));
     if (m.kind === "order" && m.answers) out.push(el("p", "wait", t("The right order:")), orderList(m.answers, m.answers.map((_, i) => i)));
-    out.push(el("p", "place", t("You're {rank}", { rank: ordinal(m.rank) })));
+    if (m.team) {
+      if (m.pts !== 0) out.push(el("p", "wait", t("Your team +{n}", { n: m.team.gained })));
+      out.push(el("p", "place", t("{team} is {rank}", { team: m.team.name, rank: ordinal(m.rank) })));
+    } else out.push(el("p", "place", t("You're {rank}", { rank: ordinal(m.rank) })));
   } else {
     out.push(el("p", "big-ok", t("Thanks!")), el("p", "wait", t("Look at the screen for the results.")));
   }
@@ -1158,6 +1193,7 @@ function hostScreen(code) {
     if (!m.quiz) return live.send({ t: "load", quiz: saved.quiz });
     Object.assign(snap, { quiz: m.quiz, phase: m.phase, qi: m.qi, boardShown: m.boardShown, shuf: m.shuf || undefined });
     snap.players = [...m.players, ...(m.out || []).map((id) => ({ id, out: true }))];
+    snap.teams = m.teams || null;
     if (m.logq && m.qi >= 0) snap.log[m.qi] = m.logq;
     keep();
     st = m;
@@ -1296,8 +1332,13 @@ function renderHost(code, m, fresh) {
       const people = el("div", "people");
       main.replaceChildren(wrap, el("p", "count"), people);
     }
-    main.querySelector(".count").textContent = active ? t("{n} people are in. Tap a name to remove it.", { n: active }) : t("Waiting for people…");
+    main.querySelector(".count").textContent = !active ? t("Waiting for people…")
+      : m.teams ? t("{n} people are in. Tap a name to move it to another team or remove it.", { n: active })
+      : t("{n} people are in. Tap a name to remove it.", { n: active });
+    teamBar(main, m);
     const people = main.querySelector(".people");
+    if (m.teams) return teamColumns(people, m);
+    people.classList.remove("teams");
     people.replaceChildren();
     for (const p of m.players) {
       const b = el("button", "who", p.name);
@@ -1318,11 +1359,15 @@ function renderHost(code, m, fresh) {
     wrap.append(el("h1", "htitle", m.quiz.title));
     if (qs.some((x) => scored(x.kind)) && m.players.length) {
       const pod = el("div", "podium");
+      const top = m.teamRank ? m.teamRank.filter((x) => x.n) : m.players;
       [1, 0, 2].forEach((k) => {
-        const p = m.players[k];
+        const p = top[k];
         if (!p) return;
         const col = el("div", "step s" + (k + 1));
-        col.append(el("span", "pname", p.name), el("span", "ppts", t("{n} points", { n: p.score })), el("span", "pplace", String(k + 1)));
+        const nm = el("span", "pname");
+        if (m.teamRank) nm.append(teamDot(p.k), " ");
+        nm.append(p.name);
+        col.append(nm, el("span", "ppts", t("{n} points", { n: p.score })), el("span", "pplace", String(k + 1)));
         pod.append(col);
       });
       wrap.append(pod);
@@ -1337,9 +1382,17 @@ function renderHost(code, m, fresh) {
   if (m.phase === "board") {
     next.textContent = m.qi >= qs.length - 1 ? t("Finish") : t("Next question");
     const wrap = el("div", "board");
-    wrap.append(el("h2", "htext", t("Top 5")));
-    const ol = el("ol", "top");
-    for (const p of m.players.slice(0, 5)) {
+    wrap.append(el("h2", "htext", m.teamRank ? t("Teams") : t("Top 5")));
+    const ol = el("ol", "top" + (m.teamRank ? " teamsTop" : ""));
+    if (m.teamRank) {
+      for (const x of m.teamRank.filter((x) => x.n)) {
+        const li = el("li");
+        const nm = el("span", "nm");
+        nm.append(teamDot(x.k), " ", x.name);
+        li.append(nm, el("span", "tgain", x.gained ? "+" + x.gained : ""), el("b", "", String(x.score)));
+        ol.append(li);
+      }
+    } else for (const p of m.players.slice(0, 5)) {
       const li = el("li");
       li.append(el("span", "nm", p.name), el("b", "", String(p.score)));
       ol.append(li);
@@ -1367,6 +1420,11 @@ function renderHost(code, m, fresh) {
       img.src = qpic;
       wrap.append(img);
     }
+    if (asking && m.talk && m.readIn > 300) {
+      const note = el("p", "talkNote", t("Team talk: decide together"));
+      wrap.append(note);
+      setTimeout(() => note.remove(), m.readIn);
+    }
     if (asking && m.endsIn) {
       const tb = timerBar();
       wrap.append(tb);
@@ -1378,6 +1436,98 @@ function renderHost(code, m, fresh) {
   main.querySelector(".answered").textContent = asking ? t("{a} of {n} answered", { a: m.answered, n: active }) : "";
   const res = main.querySelector(".res");
   res.replaceChildren(...hostResults(q, m, asking));
+}
+
+// the lobby's team switch: teams on or off, how many, team talk (Kahoot turns it on by itself)
+function teamBar(main, m) {
+  let bar = main.querySelector(".teamBar");
+  if (!bar) {
+    bar = el("div", "teamBar");
+    const on = el("label", "tsw");
+    const box = el("input");
+    box.type = "checkbox";
+    box.id = "teamsOn";
+    on.append(box, " " + t("Play in teams"));
+    const minus = el("button", "btn chip dim tminus", "−");
+    const n = el("b", "tn");
+    const plus = el("button", "btn chip dim tplus", "+");
+    const talk = el("label", "tsw talkSw");
+    const tb = el("input");
+    tb.type = "checkbox";
+    tb.id = "talkOn";
+    talk.append(tb, " " + t("Team talk (5 s to decide together)"));
+    const count = el("span", "tcount");
+    count.append(minus, n, plus, " " + t("teams"));
+    bar.append(on, count, talk);
+    main.querySelector(".count").before(bar);
+    const names = () => TEAM_NAMES.map((x) => t(x));
+    const cur = () => bar.m;
+    const send = (over) => {
+      const x = cur().teams;
+      live.send({ t: "teams", on: true, n: x ? x.names.length : 3, talk: x ? x.talk : true, names: names(), ...over });
+    };
+    box.onchange = () => (box.checked ? send({}) : live.send({ t: "teams", on: false }));
+    minus.onclick = () => send({ n: Math.max(2, cur().teams.names.length - 1) });
+    plus.onclick = () => send({ n: Math.min(MAX_TEAMS, cur().teams.names.length + 1) });
+    tb.onchange = () => send({ talk: tb.checked });
+  }
+  bar.m = m;
+  const x = m.teams;
+  bar.querySelector("#teamsOn").checked = !!x;
+  bar.querySelector(".tcount").hidden = bar.querySelector(".talkSw").hidden = !x;
+  if (x) {
+    bar.querySelector(".tn").textContent = String(x.names.length);
+    bar.querySelector(".tminus").disabled = x.names.length <= 2;
+    bar.querySelector(".tplus").disabled = x.names.length >= MAX_TEAMS;
+    bar.querySelector("#talkOn").checked = x.talk;
+  }
+}
+
+let teamSel = ""; // the person picked to move (host lobby)
+function teamColumns(people, m) {
+  const x = m.teams;
+  people.classList.add("teams");
+  const grid = el("div", "teamGrid");
+  if (!m.players.some((p) => p.id === teamSel)) teamSel = "";
+  x.names.forEach((name, k) => {
+    const col = el("div", "teamCol");
+    col.style.setProperty("--tc", TEAM_COLORS[k]);
+    const head = el("div", "teamHead");
+    const inp = el("input", "tname");
+    inp.value = name;
+    inp.maxLength = 20;
+    inp.setAttribute("aria-label", t("Team name"));
+    inp.onchange = () => { if (inp.value.trim()) live.send({ t: "rename", k, name: inp.value.trim() }); else inp.value = name; };
+    inp.onkeydown = (e) => { if (e.key === "Enter") inp.blur(); };
+    const members = m.players.filter((p) => p.team === k);
+    head.append(inp, el("span", "tsize", String(members.length)));
+    col.append(head);
+    const sel = m.players.find((p) => p.id === teamSel);
+    if (sel && sel.team !== k) {
+      const mv = el("button", "btn chip moveHere", t("Move {name} here", { name: sel.name }));
+      mv.onclick = () => { teamSel = ""; live.send({ t: "move", id: sel.id, team: k }); };
+      col.append(mv);
+    }
+    for (const p of members) {
+      const b = el("button", "who" + (p.id === teamSel ? " sel" : ""), p.name);
+      b.onclick = () => { teamSel = teamSel === p.id ? "" : p.id; teamColumns(people, m); };
+      col.append(b);
+      if (p.id === teamSel) {
+        const rm = el("button", "btn chip dim rmWho", t("Remove {name}", { name: p.name }));
+        rm.onclick = () => { teamSel = ""; live.send({ t: "remove", id: p.id }); };
+        col.append(rm);
+      }
+    }
+    grid.append(col);
+  });
+  // a name being typed is kept while others join
+  const typing = people.querySelector(".tname:focus");
+  if (typing) {
+    const k = [...people.querySelectorAll(".tname")].indexOf(typing);
+    const fresh = grid.querySelectorAll(".tname")[k];
+    if (fresh) { fresh.value = typing.value; grid.querySelectorAll(".tname")[k].replaceWith(typing); }
+  }
+  people.replaceChildren(grid);
 }
 
 function hostResults(q, m, asking) {
@@ -1520,10 +1670,11 @@ function csvCell(v) {
 function saveResults(m) {
   const qs = m.quiz.questions;
   const esc = csvCell;
-  const rows = [[t("Name"), t("Points"), ...qs.map((q, i) => (i + 1) + ". " + q.text)]];
+  const tm = m.teams;
+  const rows = [[t("Name"), ...(tm ? [t("Team")] : []), t("Points"), ...qs.map((q, i) => (i + 1) + ". " + q.text)]];
   const ranked = Object.entries(m.players).filter(([, p]) => !p.out).sort((a, b) => b[1].score - a[1].score);
   for (const [id, p] of ranked) {
-    rows.push([p.name, p.score, ...qs.map((q, i) => {
+    rows.push([p.name, ...(tm ? [tm.names[p.team] ?? ""] : []), p.score, ...qs.map((q, i) => {
       const v = m.log[i]?.[id];
       if (v == null) return "";
       if (q.kind === "type") return v + (isRight(q, v) ? " ✓" : " ✗");
@@ -1532,6 +1683,10 @@ function saveResults(m) {
       if (q.answers) return (q.answers[v] === PIC_ONLY ? LETTERS[v] : q.answers[v]) + (q.kind === "quiz" ? (q.correct.includes(v) ? " ✓" : " ✗") : "");
       return Array.isArray(v) ? v.join(" / ") : v;
     })]);
+  }
+  if (tm) {
+    rows.push([], [t("Team"), t("Team points")]);
+    tm.names.map((name, k) => [name, tm.score[k]]).sort((a, b) => b[1] - a[1]).forEach((r) => rows.push(r));
   }
   const csv = "﻿" + rows.map((r) => r.map(esc).join(",")).join("\r\n");
   downloadFile((m.quiz.title || "Ronda") + " - " + t("results") + ".csv", csv, "text/csv");

@@ -19,6 +19,26 @@ const QA_PER_PLAYER = 10;
 const QA_LEN = 160;
 const QA_ST = ["", "wait", "hi", "done"]; // shown, waiting for the host's OK, on the big screen, answered
 
+// teams (like Kahoot's team mode on personal devices): everyone plays on their own phone for a team; a team's points
+// for a question are the average of what its members got (Kahoot: "an average of team player scores")
+const MAX_TEAMS = 10; // pinned: Kahoot's larger plans allow 10 teams
+const TALK_MS = 5000; // pinned: Kahoot's team talk, "5 seconds to discuss the question and answers"
+const READ_MS = 1500;
+export const TEAM_RULES = { MAX_TEAMS, TALK_MS, READ_MS };
+export function cleanTeams(t) {
+  if (!t || typeof t !== "object" || !Array.isArray(t.names)) return null;
+  const names = t.names.slice(0, MAX_TEAMS).map((n, i) => str(n, 20) || `Team ${i + 1}`);
+  if (names.length < 2) return null;
+  const score = names.map((_, i) => Math.max(0, Math.min(1e7, Math.trunc(Number(t.score?.[i])) || 0)));
+  return { names, talk: t.talk !== false, score };
+}
+// the team with the fewest people (the first of those): where a newcomer goes
+export function smallestTeam(players, n) {
+  const size = Array(n).fill(0);
+  for (const p of Object.values(players)) if (!p.out && p.team >= 0 && p.team < n) size[p.team]++;
+  return size.indexOf(Math.min(...size));
+}
+
 // the questions the host's copy carries over to the other server (bounded, only people of this game)
 export function cleanQa(x, players) {
   const qa = { open: x?.open !== false, mod: !!x?.mod, list: [] }; // pinned: open by default, no review step
@@ -124,6 +144,12 @@ export function cleanSnap(s, host) {
     const streak = Math.max(0, Math.min(1000, Math.trunc(Number(p.streak)) || 0));
     if (streak) players[id].streak = streak;
     if (p.out) players[id].out = true;
+    if (Number.isInteger(p.team) && p.team >= 0 && p.team < MAX_TEAMS) players[id].team = p.team;
+  }
+  const teams = cleanTeams(s.teams);
+  for (const p of Object.values(players)) {
+    if (!teams) delete p.team;
+    else if (!(p.team < teams.names.length)) p.team = smallestTeam(players, teams.names.length);
   }
   const log = [];
   for (let i = 0; i <= Math.max(qi, 0) && i < (Array.isArray(s.log) ? s.log.length : 0); i++) {
@@ -148,11 +174,13 @@ export function cleanSnap(s, host) {
   }
   const g = { host, phase, quiz, qi, players, ans: {}, log, touched: Date.now(), boardShown: phase === "board" || !!s.boardShown,
     qa: cleanQa(s.qa, players) };
+  if (teams) g.teams = teams;
   if (phase === "question") {
     // the question starts again: the answers given to it were on the server that went away
     const q = quiz.questions[qi];
     g.startedAt = Date.now();
-    g.endsAt = q.time ? g.startedAt + q.time * 1000 + 1500 : 0;
+    g.readMs = readMsOf(g, q);
+    g.endsAt = q.time ? g.startedAt + q.time * 1000 + g.readMs : 0;
     g.boardShown = false;
   }
   if (phase !== "lobby" && quiz.questions[qi].kind === "order") {
@@ -229,6 +257,9 @@ export function points(q, elapsedMs, v) {
   }
   return Math.round(1000 * (q.pts ?? 1) * (1 - f / 2));
 }
+
+// before a timed question counts down: 1.5 s to read it, or team talk when the teams have it on
+export const readMsOf = (g, q) => (g.teams?.talk && q.time ? TALK_MS : READ_MS);
 
 // what a phone needs to show a slider (never the right number while asking)
 const rangeOf = (q) => (q.kind === "slider" ? { min: q.min, max: q.max, dec: q.dec, unit: q.unit || "" } : null);
@@ -358,6 +389,7 @@ export class Room {
         let name = base;
         for (let k = 2; taken.has(name.toLowerCase()); k++) name = `${base} ${k}`;
         p = g.players[id] = { name, score: 0 };
+        if (g.teams) p.team = smallestTeam(g.players, g.teams.names.length);
         await this.save();
       }
       if (p.out) return this.send(ws, { t: "removed" });
@@ -372,6 +404,14 @@ export class Room {
       if (msg.t === "answer") return this.answer(me.id, msg);
       if (msg.t === "ask") return this.ask(ws, me.id, msg);
       if (msg.t === "vote") return this.vote(me.id, msg);
+      // in the lobby people may pick their own team (Kahoot: "Players can choose their team when they join")
+      if (msg.t === "team" && g.phase === "lobby" && g.teams) {
+        const k = Number(msg.team);
+        if (!Number.isInteger(k) || k < 0 || k >= g.teams.names.length) return;
+        g.players[me.id].team = k;
+        await this.save();
+        return this.everyone();
+      }
       return;
     }
     if (me.role !== "host") return;
@@ -382,6 +422,21 @@ export class Room {
       g.quiz = quiz;
       await this.save(true);
       return this.hostsUpdate();
+    }
+    if (msg.t === "teams" && g.phase === "lobby") return this.setTeams(msg);
+    if (msg.t === "rename" && g.teams) {
+      const k = Number(msg.k), name = str(msg.name, 20);
+      if (!Number.isInteger(k) || k < 0 || k >= g.teams.names.length || !name) return;
+      g.teams.names[k] = name;
+      await this.save();
+      return this.everyone();
+    }
+    if (msg.t === "move" && g.teams && g.phase === "lobby") {
+      const p = g.players[String(msg.id)], k = Number(msg.team);
+      if (!p || p.out || !Number.isInteger(k) || k < 0 || k >= g.teams.names.length) return;
+      p.team = k;
+      await this.save();
+      return this.everyone();
     }
     if (msg.t === "next") return this.next();
     if (msg.t === "reveal" && g.phase === "question") return this.reveal();
@@ -396,7 +451,7 @@ export class Room {
       }
       return this.hostsUpdate();
     }
-    if (msg.t === "export") return this.send(ws, { t: "export", log: g.log, players: g.players, quiz: g.quiz });
+    if (msg.t === "export") return this.send(ws, { t: "export", log: g.log, players: g.players, quiz: g.quiz, teams: g.teams || null });
     if (msg.t === "qa") return this.qaAct(msg);
     if (msg.t === "close") {
       g.touched = 0;
@@ -405,6 +460,27 @@ export class Room {
       await this.state.storage.deleteAll();
       return this.send(ws, { t: "closed" });
     }
+  }
+
+  // teams on or off, how many, team talk; only before the first question
+  async setTeams(msg) {
+    const g = this.g;
+    if (!msg.on) {
+      delete g.teams;
+      for (const p of Object.values(g.players)) delete p.team;
+    } else {
+      const n = Math.max(2, Math.min(MAX_TEAMS, Math.trunc(Number(msg.n)) || 3));
+      const given = Array.isArray(msg.names) ? msg.names : [];
+      const old = g.teams?.names || [];
+      const names = Array.from({ length: n }, (_, i) => old[i] || str(given[i], 20) || `Team ${i + 1}`);
+      g.teams = { names, talk: msg.talk !== false, score: names.map(() => 0) };
+      // everyone keeps their team if it is still there; the rest go where there are fewest, one by one
+      const loose = [];
+      for (const p of Object.values(g.players)) if (!(p.team >= 0 && p.team < n)) (delete p.team, loose.push(p));
+      for (const p of loose) p.team = smallestTeam(g.players, n);
+    }
+    await this.save(true);
+    this.everyone();
   }
 
   async next() {
@@ -424,7 +500,8 @@ export class Room {
       g.ans = {};
       const q = g.quiz.questions[g.qi];
       g.startedAt = Date.now();
-      g.endsAt = q.time ? g.startedAt + q.time * 1000 + 1500 : 0; // 1.5 s to read before answers count down
+      g.readMs = readMsOf(g, q);
+      g.endsAt = q.time ? g.startedAt + q.time * 1000 + g.readMs : 0; // time to read (or team talk) before answers count down
       g.shuf = q.kind === "order" ? shuffle(q.answers.length) : undefined;
     }
     await this.save(true);
@@ -441,7 +518,7 @@ export class Room {
     if (scored(q.kind)) {
       for (const [id, a] of Object.entries(g.ans)) {
         if (isRight(q, a.v)) {
-          const pts = points(q, Math.max(0, a.at - g.startedAt - 1500), a.v);
+          const pts = points(q, Math.max(0, a.at - g.startedAt - (g.readMs ?? READ_MS)), a.v);
           g.gained[id] = pts;
           if (g.players[id]) g.players[id].score += pts;
         }
@@ -453,6 +530,17 @@ export class Room {
           if (g.ans[id] && isRight(q, g.ans[id].v)) p.streak = (p.streak || 0) + 1;
           else delete p.streak;
         }
+      }
+      // a team gets the average of what its members got (a member who didn't answer got 0)
+      if (g.teams) {
+        const sum = g.teams.names.map(() => 0), size = g.teams.names.map(() => 0);
+        for (const [id, p] of Object.entries(g.players)) {
+          if (p.out || !(p.team < size.length)) continue;
+          size[p.team]++;
+          sum[p.team] += g.gained[id] || 0;
+        }
+        g.teamGained = sum.map((v, k) => (size[k] ? Math.round(v / size[k]) : 0));
+        g.teamGained.forEach((v, k) => (g.teams.score[k] += v));
       }
     }
     g.log[g.qi] = Object.fromEntries(Object.entries(g.ans).map(([id, a]) => [id, a.v]));
@@ -468,6 +556,8 @@ export class Room {
     if (!p || p.out) return;
     const q = g.quiz.questions[g.qi];
     if (g.endsAt && Date.now() > g.endsAt + 500) return;
+    // team talk: the answers open when it is over (a little slack for clocks)
+    if (g.endsAt && (g.readMs ?? READ_MS) > READ_MS && Date.now() < g.startedAt + g.readMs - 300) return;
     let v;
     if (q.kind === "quiz" || q.kind === "poll") {
       if (g.ans[id]) return; // one answer, no changes (speed counts)
@@ -620,8 +710,18 @@ export class Room {
   ranking() {
     return Object.entries(this.g.players)
       .filter(([, p]) => !p.out)
-      .map(([id, p]) => ({ id, name: p.name, score: p.score, ...(p.streak ? { streak: p.streak } : {}) }))
+      .map(([id, p]) => ({ id, name: p.name, score: p.score, ...(p.streak ? { streak: p.streak } : {}), ...(p.team != null ? { team: p.team } : {}) }))
       .sort((a, b) => b.score - a.score);
+  }
+
+  // teams by points (ties: the first team first), with how many people are in each
+  teamRanking() {
+    const t = this.g.teams;
+    if (!t) return null;
+    const size = t.names.map(() => 0);
+    for (const p of Object.values(this.g.players)) if (!p.out && p.team < size.length) size[p.team]++;
+    return t.names.map((name, k) => ({ k, name, score: t.score[k], n: size[k], gained: this.g.teamGained?.[k] || 0 }))
+      .sort((a, b) => b.score - a.score || a.k - b.k);
   }
 
   hostView() {
@@ -634,6 +734,8 @@ export class Room {
       quiz: g.quiz,
       qi: g.qi,
       players: this.ranking(),
+      teams: g.teams ? { names: g.teams.names, talk: g.teams.talk, score: g.teams.score } : null,
+      teamRank: this.teamRanking(),
       out: Object.keys(g.players).filter((id) => g.players[id].out), // the host's copy of the game keeps these
       logq: g.qi >= 0 && g.phase !== "question" ? g.log[g.qi] || {} : null,
       boardShown: !!g.boardShown,
@@ -641,7 +743,8 @@ export class Room {
       results: live ? this.results() : null,
       shuf: q?.kind === "order" ? g.shuf : null,
       endsIn: g.phase === "question" && g.endsAt ? g.endsAt - Date.now() : 0,
-      readIn: g.phase === "question" ? Math.max(0, g.startedAt + 1500 - Date.now()) : 0,
+      readIn: g.phase === "question" ? Math.max(0, g.startedAt + (g.readMs ?? READ_MS) - Date.now()) : 0,
+      talk: g.phase === "question" && (g.readMs ?? READ_MS) > READ_MS,
     };
   }
 
@@ -659,17 +762,22 @@ export class Room {
     const g = this.g;
     const p = g.players[id];
     const base = { t: "view", phase: g.phase, name: p.name, score: p.score, title: g.quiz?.title || "" };
-    if (g.phase === "lobby") return base;
+    // with teams a phone shows its team's points and place (Kahoot: "Player scores are not visible during gameplay")
+    const tr = this.teamRanking();
+    const mineT = tr && tr.find((x) => x.k === p.team);
+    if (mineT) Object.assign(base, { team: { k: mineT.k, name: mineT.name, n: mineT.n, gained: mineT.gained }, score: mineT.score });
+    if (g.phase === "lobby") return tr ? { ...base, teams: g.teams.names } : base;
     const q = g.quiz.questions[g.qi];
     const n = g.quiz.questions.length;
     const mine = g.ans[id]?.v ?? null;
     if (g.phase === "question") {
       return { ...base, qi: g.qi, n, kind: q.kind, pts: q.pts ?? 1, text: q.text, answers: q.answers || null, mine,
         shuf: q.kind === "order" ? g.shuf : null, range: rangeOf(q),
-        endsIn: g.endsAt ? g.endsAt - Date.now() : 0, readIn: Math.max(0, g.startedAt + 1500 - Date.now()) };
+        endsIn: g.endsAt ? g.endsAt - Date.now() : 0, readIn: Math.max(0, g.startedAt + (g.readMs ?? READ_MS) - Date.now()),
+        talk: (g.readMs ?? READ_MS) > READ_MS };
     }
-    const rank = this.ranking().findIndex((r) => r.id === id) + 1;
-    if (g.phase === "end") return { ...base, rank, of: this.ranking().length, quizzy: g.quiz.questions.some((x) => scored(x.kind)) };
+    const rank = mineT ? tr.indexOf(mineT) + 1 : this.ranking().findIndex((r) => r.id === id) + 1;
+    if (g.phase === "end") return { ...base, rank, of: tr ? tr.length : this.ranking().length, quizzy: g.quiz.questions.some((x) => scored(x.kind)) };
     return { ...base, qi: g.qi, n, kind: q.kind, pts: q.pts ?? 1, streak: p.streak || 0, text: q.text, answers: q.answers || null, mine,
       correct: q.kind === "quiz" ? q.correct : q.kind === "type" ? q.accept : q.kind === "slider" ? q.ans : null, range: rangeOf(q),
       right: scored(q.kind) && mine != null ? isRight(q, mine) : null, gained: g.gained?.[id] || 0, rank };

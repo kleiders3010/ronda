@@ -314,3 +314,31 @@ div.typed .chip.ok { outline: 2px solid #86efac; }
 .track .mark { position: absolute; top: -14px; bottom: -14px; width: 6px; margin-left: -3px; border-radius: 3px; background: #fff; left: var(--to); animation: slideIn 1.4s cubic-bezier(.3, 1.4, .5, 1); }
 @keyframes slideIn { from { left: 0; } }
 @media (prefers-reduced-motion: reduce) { .track .mark { animation: none; } }
+
+/* teams (like Kahoot's team mode) */
+.tdot { display: inline-block; width: .8em; height: .8em; border-radius: 50%; vertical-align: middle; flex: none; }
+.pteam { display: inline-flex; align-items: center; gap: 6px; color: #d6d1f0; margin-right: auto; margin-left: 12px; overflow: hidden; white-space: nowrap; }
+.teamPick { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 8px; }
+.btn.tpick { display: inline-flex; align-items: center; gap: 8px; background: transparent; color: inherit; border: 1.5px solid #4c4475; padding: 10px 16px; }
+.btn.tpick[aria-pressed="true"] { background: #5b21b6; border-color: #c4b5fd; }
+.talkNote { font-weight: 800; color: #fde68a; margin: 6px 0; animation: pop .25s ease-out; }
+.talking .pa, .talking .scale, .talking .wordForm { opacity: .55; }
+.teamBar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px 24px; margin: 2vh 0 0; font-size: 18px; }
+.teamBar .tsw { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.teamBar input[type=checkbox] { width: 20px; height: 20px; }
+.tcount { display: inline-flex; align-items: center; gap: 10px; }
+.tcount[hidden], .talkSw[hidden] { display: none; }
+.tcount .btn.chip { padding: 2px 14px; font-size: 20px; }
+.people.teams { display: block; width: 100%; }
+.teamGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; width: 100%; }
+.teamCol { display: flex; flex-direction: column; align-items: stretch; gap: 6px; background: #17132e; border-top: 6px solid var(--tc); border-radius: 12px; padding: 10px; }
+.teamHead { display: flex; align-items: center; gap: 8px; }
+.tname { flex: 1; min-width: 0; background: transparent; border: 1px solid transparent; border-radius: 8px; color: inherit; font: inherit; font-weight: 800; font-size: 20px; padding: 2px 6px; }
+.tname:hover, .tname:focus { border-color: #4c4475; outline: none; background: var(--night2); }
+.tsize { color: #a59fc9; font-weight: 700; }
+.teamCol .who { font-size: 17px; padding: 6px 12px; color: #fff; border: 0; animation: none; }
+.teamCol .who.sel { outline: 3px solid var(--tc); }
+.btn.chip.moveHere { background: transparent; color: inherit; border: 1.5px dashed var(--tc); font-size: 14px; }
+.btn.chip.rmWho { font-size: 14px; background: transparent; color: #fda4af; border-color: #9f1239; }
+.teamsTop .nm { display: inline-flex; align-items: center; gap: 12px; }
+.teamsTop .tgain { color: #86efac; font-size: .75em; }

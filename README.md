@@ -19,6 +19,13 @@ their phone with a short code. No account, no player limit, nothing to install, 
   of the range either way; maximum: every guess) says which guesses get points; the closer, the more (80% how close, 20% how fast). Phones get a slider
   with − / + for one step (the keyboard's arrows work too); the big screen shows every guess as a dot and the right
   number sliding into place. `python worker/slider_test.py`.
+- **Teams** (like Kahoot's team mode, a paid feature there with personal devices): before starting, "Play in teams"
+  (2 to 10 teams, 3 to begin with). Everyone plays on their own phone; teams fill evenly by themselves, people can pick
+  theirs in the lobby, and the host renames teams and moves or removes people. Team talk (on by itself, can be turned
+  off) shows each timed question and its answers for 5 s before answering opens, to decide together. A team gets the
+  average of what its members got on each question (someone who didn't answer got 0); phones show their team's points
+  and place, the scoreboard and the podium show teams, and the download has a Team column and each team's points.
+  `python worker/teams_test.py`.
 - **Audience questions** (like Slido's Q&A), any time during a ronda: people ask the host from their phone, with
   their name or anonymously, and upvote each other's questions (popular or recent first). The host shows one on the
   big screen, marks it answered or deletes it, can approve each question before anyone sees it, can close questions,
