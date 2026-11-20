@@ -1878,6 +1878,7 @@ function reportScreen(code) {
     }
     if (m.t !== "report") return;
     rec.until = m.until;
+    rec.open = m.open; // the server's word, not this device's clock
     putAssigned(rec);
     if (!editingUntil) drawCtl(m);
     drawReport(m);
@@ -2016,7 +2017,7 @@ function drawAssigned() {
   $("#asg").replaceChildren(...list.map((r) => {
     const li = el("li", "mineRow");
     const open = el("button", "mineOpen");
-    open.append(el("b", "", r.title), el("span", "small", Date.now() < r.until ? t("Open until {when}", { when: fmtWhen(r.until) }) : t("Closed")));
+    open.append(el("b", "", r.title), el("span", "small", r.open !== false && Date.now() < r.until ? t("Open until {when}", { when: fmtWhen(r.until) }) : t("Closed")));
     open.onclick = () => go("/report/" + r.code);
     li.append(open);
     return li;
