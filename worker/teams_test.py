@@ -186,7 +186,7 @@ with sync_playwright() as p:
     check(all(by[n][1] == "Reds" for n in first) and all(by[n][1] != "Reds" for n in second), "each person's team")  # pinned: "Reds" is the name this test typed
     reds = next((r for r in rows if r[:1] == ["Reds"] and len(r) == 2), None)
     right = int(by[first[0]][2])
-    check(reds is not None and int(reds[1]) == round(right / 2), f"Reds' points = the average of its two people ({reds}, {right})")  # pinned: Kahoot's average
+    check(reds is not None and int(reds[1]) == int(right / 2 + 0.5), f"Reds' points = the average of its two people ({reds}, {right})")  # pinned: Kahoot's average
     for pg in [h, *pl.values()]:
         pg.context.close()
     b.close()
