@@ -26,6 +26,14 @@ their phone with a short code. No account, no player limit, nothing to install, 
   average of what its members got on each question (someone who didn't answer got 0); phones show their team's points
   and place, the scoreboard and the podium show teams, and the download has a Team column and each team's points.
   `python worker/teams_test.py`.
+- **Assign** (like Kahoot's assignments): no big screen; everyone plays the whole ronda on their own phone, at their own
+  pace, until a deadline you pick (up to 28 days ahead; a week to begin with). Send the link, the QR code or the code.
+  Each phone shows the questions and answers (in a different order on each phone unless you turn that off), with each
+  question's own timer and points, right or wrong at once, and at the end the place, the right answers and the top 5.
+  Someone who leaves comes back where they were (the clock keeps going). The report, on the device that made it (listed
+  on the start page), shows who started, who finished, right answers, points and each question; move the deadline, end
+  it now, remove someone, download the results. After the deadline nobody new can start; it is deleted 30 days later.
+  Pictures stay on your device: answers that are only a picture need words to be assigned. `python worker/assign_test.py`.
 - **Audience questions** (like Slido's Q&A), any time during a ronda: people ask the host from their phone, with
   their name or anonymously, and upvote each other's questions (popular or recent first). The host shows one on the
   big screen, marks it answered or deletes it, can approve each question before anyone sees it, can close questions,

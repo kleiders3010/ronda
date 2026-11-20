@@ -39,6 +39,43 @@ export function smallestTeam(players, n) {
   return size.indexOf(Math.min(...size));
 }
 
+// assignments (like Kahoot's "Assign", help 'How to assign a kahoot'): no big screen; everyone plays the whole quiz
+// on their own phone, at their own pace, until a deadline. The results stay for the host a while after it.
+const MAX_DAYS = 28; // pinned: Kahoot, "a deadline up to 28 days ahead"
+const KEEP_MS = 30 * 86400000; // pinned: privacy page, results deleted 30 days after the deadline
+export const SELF_RULES = { MAX_DAYS, KEEP_MS, READ_MS };
+// when a room is deleted: a live game 6 hours after the last activity, an assignment 30 days after its deadline
+export const expiry = (g) => (g.self ? g.self.until + KEEP_MS : g.touched + ROOM_TTL);
+// an answer as it arrives, checked against the question (prev: what this person already sent for it)
+function parseAnswer(q, raw, prev) {
+  if (q.kind === "scale") {
+    const v = Number(raw);
+    return Number.isInteger(v) && v >= 1 && v <= 5 ? v : undefined;
+  }
+  if (q.kind === "words") {
+    const w = str(raw, 40).toLowerCase();
+    const have = prev?.v || [];
+    if (!w || have.length >= 3 || have.includes(w)) return undefined;
+    return [...have, w];
+  }
+  if (prev) return undefined; // one answer, no changes (speed counts)
+  if (q.kind === "quiz" || q.kind === "poll") {
+    const v = Number(raw);
+    return Number.isInteger(v) && v >= 0 && v < q.answers.length ? v : undefined;
+  }
+  if (q.kind === "type") return str(raw, 60) || undefined;
+  if (q.kind === "slider") {
+    const v = typeof raw === "number" ? raw : NaN;
+    if (!Number.isFinite(v) || v < q.min || v > q.max) return undefined;
+    return Math.round(v * 10 ** q.dec) / 10 ** q.dec;
+  }
+  if (q.kind === "order") {
+    const v = Array.isArray(raw) ? raw.map(Number) : null;
+    return isPerm(v, q.answers.length) ? v : undefined;
+  }
+  return undefined;
+}
+
 // the questions the host's copy carries over to the other server (bounded, only people of this game)
 export function cleanQa(x, players) {
   const qa = { open: x?.open !== false, mod: !!x?.mod, list: [] }; // pinned: open by default, no review step
@@ -295,7 +332,7 @@ export class Room {
   async plan() {
     const g = this.g;
     if (!g) return;
-    let at = g.touched + ROOM_TTL;
+    let at = expiry(g);
     if (g.phase === "question" && g.endsAt) at = Math.min(at, g.endsAt + 300);
     await this.state.storage.setAlarm(at);
   }
@@ -303,7 +340,7 @@ export class Room {
   async alarm() {
     const g = await this.game();
     if (!g) return;
-    if (Date.now() >= g.touched + ROOM_TTL) {
+    if (Date.now() >= expiry(g)) {
       for (const ws of this.state.getWebSockets()) ws.close(1000, "closed");
       this.g = null;
       await this.state.storage.deleteAll();
@@ -317,7 +354,7 @@ export class Room {
     const url = new URL(req.url);
     if (url.pathname === "/claim") {
       const g = await this.game();
-      if (g && Date.now() < g.touched + ROOM_TTL) return new Response("taken", { status: 409 });
+      if (g && Date.now() < expiry(g)) return new Response("taken", { status: 409 });
       await this.state.storage.deleteAll();
       this.g = { host: await req.text(), phase: "lobby", quiz: null, qi: -1, players: {}, ans: {}, log: [], touched: Date.now(), qa: cleanQa(null, {}) };
       await this.save(true);
@@ -382,7 +419,7 @@ export class Room {
       if (!/^[A-Za-z0-9_-]{8,40}$/.test(id)) return;
       let p = g.players[id];
       if (!p) {
-        if (g.phase === "end") return this.send(ws, { t: "over" });
+        if (g.phase === "end" || (g.self && Date.now() >= g.self.until)) return this.send(ws, { t: "over" });
         if (Object.keys(g.players).length >= MAX_PLAYERS) return this.send(ws, { t: "full", max: MAX_PLAYERS });
         const base = str(msg.name, 30) || "Player";
         const taken = new Set(Object.values(g.players).map((x) => x.name.toLowerCase()));
@@ -390,10 +427,16 @@ export class Room {
         for (let k = 2; taken.has(name.toLowerCase()); k++) name = `${base} ${k}`;
         p = g.players[id] = { name, score: 0 };
         if (g.teams) p.team = smallestTeam(g.players, g.teams.names.length);
+        if (g.self) Object.assign(p, { ph: "intro", qi: -1, ans: [], at: 0 });
         await this.save();
       }
       if (p.out) return this.send(ws, { t: "removed" });
       ws.serializeAttachment({ role: "player", id });
+      if (g.self) {
+        await this.selfCatchUp(id);
+        this.send(ws, this.playerView(id));
+        return this.hostsUpdate();
+      }
       this.send(ws, this.playerView(id));
       this.send(ws, this.playerQa(id));
       return this.hostsUpdate();
@@ -401,6 +444,11 @@ export class Room {
 
     if (me.role === "player") {
       if (g.players[me.id]?.out) return;
+      if (g.self) {
+        if (msg.t === "answer") return this.selfAnswer(me.id, msg);
+        if (msg.t === "go") return this.selfGo(me.id, msg);
+        return;
+      }
       if (msg.t === "answer") return this.answer(me.id, msg);
       if (msg.t === "ask") return this.ask(ws, me.id, msg);
       if (msg.t === "vote") return this.vote(me.id, msg);
@@ -415,6 +463,11 @@ export class Room {
       return;
     }
     if (me.role !== "host") return;
+    if (msg.t === "assign" && g.phase === "lobby" && !g.quiz && !Object.keys(g.players).length) return this.assign(ws, msg);
+    if (g.self) {
+      if (msg.t === "until" || msg.t === "end") return this.selfUntil(msg);
+      if (msg.t !== "remove" && msg.t !== "close") return;
+    }
 
     if (msg.t === "load" && g.phase === "lobby") {
       const quiz = cleanQuiz(msg.quiz);
@@ -558,34 +611,8 @@ export class Room {
     if (g.endsAt && Date.now() > g.endsAt + 500) return;
     // team talk: the answers open when it is over (a little slack for clocks)
     if (g.endsAt && (g.readMs ?? READ_MS) > READ_MS && Date.now() < g.startedAt + g.readMs - 300) return;
-    let v;
-    if (q.kind === "quiz" || q.kind === "poll") {
-      if (g.ans[id]) return; // one answer, no changes (speed counts)
-      v = Number(msg.v);
-      if (!Number.isInteger(v) || v < 0 || v >= q.answers.length) return;
-    } else if (q.kind === "scale") {
-      v = Number(msg.v);
-      if (!Number.isInteger(v) || v < 1 || v > 5) return;
-    } else if (q.kind === "type") {
-      if (g.ans[id]) return;
-      v = str(msg.v, 60);
-      if (!v) return;
-    } else if (q.kind === "slider") {
-      if (g.ans[id]) return;
-      v = typeof msg.v === "number" ? msg.v : NaN;
-      if (!Number.isFinite(v) || v < q.min || v > q.max) return;
-      v = Math.round(v * 10 ** q.dec) / 10 ** q.dec;
-    } else if (q.kind === "order") {
-      if (g.ans[id]) return;
-      v = Array.isArray(msg.v) ? msg.v.map(Number) : null;
-      if (!isPerm(v, q.answers.length)) return;
-    } else {
-      const w = str(msg.v, 40).toLowerCase();
-      if (!w) return;
-      const have = g.ans[id]?.v || [];
-      if (have.length >= 3 || have.includes(w)) return;
-      v = [...have, w];
-    }
+    const v = parseAnswer(q, msg.v, q.kind === "scale" ? null : g.ans[id]);
+    if (v === undefined) return;
     g.ans[id] = { v, at: Date.now() };
     await this.save();
     for (const s of this.sockets("player")) if (s.deserializeAttachment().id === id) this.send(s, this.playerView(id));
@@ -707,6 +734,178 @@ export class Room {
     }
   }
 
+  // ---- assignments: each person goes through the questions on their own (p.ph intro / question / reveal / end) ----
+  async assign(ws, msg) {
+    const g = this.g;
+    const quiz = cleanQuiz(msg.quiz);
+    if (!quiz) return this.send(ws, { t: "bad-quiz" });
+    const now = Date.now();
+    const until = Math.trunc(Number(msg.until));
+    if (!(until > now + 60000) || until > now + MAX_DAYS * 86400000 + 3600000) return this.send(ws, { t: "bad-until" });
+    g.quiz = quiz;
+    g.phase = "self";
+    g.self = { until, made: now, mix: msg.mix !== false }; // pinned: answers mixed on each phone unless turned off
+    g.qa.open = false;
+    await this.save(true);
+    await this.plan();
+    this.hostsUpdate();
+  }
+
+  // the host moves the deadline (up to 28 days from now) or ends it now; a finished one can't be opened again
+  async selfUntil(msg) {
+    const g = this.g, now = Date.now();
+    if (now >= g.self.until) return;
+    if (msg.t === "end") g.self.until = now;
+    else {
+      const u = Math.trunc(Number(msg.until));
+      if (!(u > now + 60000) || u > now + MAX_DAYS * 86400000 + 3600000) return;
+      g.self.until = u;
+    }
+    await this.save(true);
+    await this.plan();
+    if (now >= g.self.until) for (const id of Object.keys(g.players)) await this.selfCatchUp(id, false);
+    this.everyone();
+  }
+
+  selfOpen() {
+    return Date.now() < this.g.self.until;
+  }
+
+  // time is up for the question someone is on (they left mid-question, or their phone said so)
+  selfLate(p, q, slack = 1500) {
+    return !!q.time && Date.now() > p.at + READ_MS + q.time * 1000 + slack;
+  }
+
+  // a phone coming back: a question whose time ran out shows its answer; after the deadline, it is over
+  async selfCatchUp(id, save = true) {
+    const g = this.g, p = g.players[id];
+    if (!p || p.ph === "end") return;
+    if (!this.selfOpen()) {
+      if (p.ph === "question") this.selfScore(p);
+      p.ph = "end";
+    } else if (p.ph === "question" && this.selfLate(p, g.quiz.questions[p.qi])) this.selfScore(p);
+    if (save) await this.save();
+  }
+
+  // the question someone is on is over for them: their points, their streak (as in a live game)
+  selfScore(p) {
+    const q = this.g.quiz.questions[p.qi];
+    const a = p.ans[p.qi];
+    p.ph = "reveal";
+    p.gained = 0;
+    if (!scored(q.kind)) return;
+    const ok = !!a && isRight(q, a.v);
+    if (ok) {
+      p.gained = points(q, Math.max(0, a.at - p.at - READ_MS), a.v);
+      p.score += p.gained;
+    }
+    if (q.pts !== 0) ok ? (p.streak = (p.streak || 0) + 1) : delete p.streak;
+  }
+
+  // Start / Next / Done (words) / time is up
+  async selfGo(id, msg) {
+    const g = this.g, p = g.players[id];
+    if (!p || p.ph === "end") return;
+    if (!this.selfOpen()) await this.selfCatchUp(id);
+    else if (p.ph === "question") {
+      if (msg.qi !== p.qi) return;
+      const q = g.quiz.questions[p.qi];
+      if (q.kind !== "words" && !this.selfLate(p, q, -500)) return;
+      this.selfScore(p);
+    } else {
+      const n = g.quiz.questions.length;
+      if (msg.qi !== p.qi) return; // a second tap on the same Next
+      if (p.qi + 1 >= n) {
+        p.ph = "end";
+        p.done = Date.now();
+      } else {
+        p.qi++;
+        p.ph = "question";
+        p.at = Date.now();
+        delete p.gained;
+        const q = g.quiz.questions[p.qi];
+        if (g.self.mix && (q.kind === "quiz" || q.kind === "poll")) (p.mix ||= [])[p.qi] = shuffle(q.answers.length);
+        if (q.kind === "order") (p.shuf ||= [])[p.qi] = shuffle(q.answers.length);
+      }
+    }
+    await this.save();
+    this.selfSend(id);
+    this.hostsUpdate();
+  }
+
+  async selfAnswer(id, msg) {
+    const g = this.g, p = g.players[id];
+    if (!p || p.ph !== "question" || msg.qi !== p.qi) return;
+    if (!this.selfOpen()) {
+      await this.selfCatchUp(id);
+      return this.selfSend(id);
+    }
+    const q = g.quiz.questions[p.qi];
+    if (this.selfLate(p, q)) {
+      this.selfScore(p);
+    } else {
+      let raw = msg.v;
+      const mix = p.mix?.[p.qi];
+      if (mix) {
+        const j = Number(raw);
+        if (!Number.isInteger(j) || j < 0 || j >= mix.length) return;
+        raw = mix[j]; // the phone's order -> the question's
+      }
+      const v = parseAnswer(q, raw, p.ans[p.qi]);
+      if (v === undefined) return;
+      p.ans[p.qi] = { v, at: Date.now() };
+      if (!(q.kind === "words" && v.length < 3)) this.selfScore(p);
+    }
+    await this.save();
+    this.selfSend(id);
+    this.hostsUpdate();
+  }
+
+  selfSend(id) {
+    for (const s of this.sockets("player")) if (s.deserializeAttachment().id === id) this.send(s, this.playerView(id));
+  }
+
+  selfView(id) {
+    const g = this.g, p = g.players[id], now = Date.now();
+    const n = g.quiz.questions.length;
+    const base = { t: "view", self: true, phase: p.ph, name: p.name, score: p.score, title: g.quiz.title, n,
+      until: g.self.until, open: this.selfOpen(), quizzy: g.quiz.questions.some((x) => scored(x.kind)) };
+    if (p.ph === "intro") return base;
+    const r = this.ranking();
+    const rank = r.findIndex((x) => x.id === id) + 1;
+    if (p.ph === "end") {
+      const right = g.quiz.questions.filter((q, i) => scored(q.kind) && p.ans[i] && isRight(q, p.ans[i].v)).length;
+      return { ...base, rank, of: r.length, right, of2: g.quiz.questions.filter((q) => scored(q.kind)).length,
+        top: r.slice(0, 5).map((x) => [x.name, x.score]), done: !!p.done };
+    }
+    const q = g.quiz.questions[p.qi];
+    const mix = p.mix?.[p.qi];
+    const answers = q.answers ? (mix ? mix.map((i) => q.answers[i]) : q.answers) : null;
+    const a = p.ans[p.qi];
+    const mine = a == null ? null : mix ? mix.indexOf(a.v) : a.v;
+    const common = { ...base, qi: p.qi, kind: q.kind, pts: q.pts ?? 1, text: q.text, answers, mine, range: rangeOf(q),
+      last: p.qi === n - 1 };
+    if (p.ph === "question") {
+      return { ...common, shuf: q.kind === "order" ? p.shuf?.[p.qi] : null, talk: false,
+        endsIn: q.time ? Math.max(1, p.at + READ_MS + q.time * 1000 - now) : 0, readIn: Math.max(0, p.at + READ_MS - now) };
+    }
+    return { ...common, streak: p.streak || 0, rank, gained: p.gained || 0,
+      correct: q.kind === "quiz" ? q.correct.map((i) => (mix ? mix.indexOf(i) : i)) : q.kind === "type" ? q.accept : q.kind === "slider" ? q.ans : null,
+      right: scored(q.kind) && a != null ? isRight(q, a.v) : null };
+  }
+
+  // what the host's report shows: everyone's progress and answers (in the question's own order)
+  report() {
+    const g = this.g;
+    const people = Object.entries(g.players).filter(([, p]) => !p.out).map(([id, p]) => ({
+      id, name: p.name, score: p.score, done: p.ph === "end" && !!p.done, started: p.ph !== "intro",
+      at: p.ph === "end" ? g.quiz.questions.length : Math.max(0, p.qi + (p.ph === "reveal" ? 1 : 0)),
+      ans: g.quiz.questions.map((_, i) => (p.ans[i] ? p.ans[i].v : null)),
+    })).sort((a, b) => b.score - a.score);
+    return { t: "report", quiz: g.quiz, until: g.self.until, made: g.self.made, mix: g.self.mix, open: this.selfOpen(),
+      keep: g.self.until + KEEP_MS, people };
+  }
+
   ranking() {
     return Object.entries(this.g.players)
       .filter(([, p]) => !p.out)
@@ -749,17 +948,19 @@ export class Room {
   }
 
   toHost(ws) {
+    if (this.g.self) return this.send(ws, this.report());
     this.send(ws, this.hostView());
     this.send(ws, this.hostQa());
   }
 
   hostsUpdate() {
-    const v = this.hostView();
+    const v = this.g.self ? this.report() : this.hostView();
     for (const ws of this.sockets("host")) this.send(ws, v);
   }
 
   playerView(id) {
     const g = this.g;
+    if (g.self) return this.selfView(id);
     const p = g.players[id];
     const base = { t: "view", phase: g.phase, name: p.name, score: p.score, title: g.quiz?.title || "" };
     // with teams a phone shows its team's points and place (Kahoot: "Player scores are not visible during gameplay")

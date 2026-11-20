@@ -30,6 +30,8 @@ const MARGIN_NAME = ["None (only the exact number)", "Low", "Medium", "High", "M
 const sliderTol = (q) => MARGINS[q.margin ?? 2] * (q.max - q.min);
 // a number as people read it: up to the slider's decimals (all of them with fixed), thousands grouped only from 10 000
 // (a year stays 1969)
+// a day and time as people read them, in their language ("Fri 27 Nov, 18:00")
+const fmtWhen = (ms) => new Date(ms).toLocaleString(LANG, { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
 function fmtNum(v, dec = 0, unit = "", fixed = false) {
   const s = Number(v).toLocaleString(LANG === "es" ? "es-AR" : "en-US", { minimumFractionDigits: fixed ? dec : 0, maximumFractionDigits: dec,
     useGrouping: Math.abs(v) >= 10000 });
@@ -94,6 +96,7 @@ function route() {
   if ((m = p.match(/^\/(\d{6})$/))) return nameScreen(m[1]);
   if ((m = p.match(/^\/edit\/([a-z0-9]+)$/))) return editScreen(m[1]);
   if ((m = p.match(/^\/host\/(\d{6})$/))) return hostScreen(m[1]);
+  if ((m = p.match(/^\/report\/(\d{6})$/))) return reportScreen(m[1]);
   if (location.hash.startsWith("#r=")) return importLink(location.hash.slice(3));
   homeScreen();
 }
@@ -229,6 +232,7 @@ function homeScreen() {
   fileRow.append(fb);
   ul.append(fileRow);
   $("#code").value = "";
+  drawAssigned();
   keepOnly(new Set(list.flatMap((q) => q.questions.flatMap(picsOf))));
 }
 $("#code").addEventListener("input", (e) => {
@@ -640,6 +644,24 @@ async function startHosting(q) {
     $("#editMsg").hidden = false;
     return;
   }
+  const room = await makeRoom();
+  if (!room) return toast(t("Couldn't start. Check the internet and try again."));
+  const { code, token, at } = room;
+  const questions = bare(q.questions).map((x, i) => {
+    const aimg = q.questions[i].aimg;
+    return aimg && x.answers ? { ...x, answers: x.answers.map((a, j) => (a.trim() ? a : aimg[j] ? PIC_ONLY : a)) } : x;
+  });
+  const pics = questions.map((x, i) => {
+    const src = q.questions[i];
+    const a = src.aimg && x.answers ? x.answers.map((v, j) => [v, src.aimg[j] || null]).filter(([v]) => v.trim()).map(([, k]) => k) : null;
+    return src.img || a ? { q: src.img || null, a } : null;
+  });
+  sessionStorage.setItem("host:" + code, JSON.stringify({ token, at, quiz: { title: q.title, questions }, pics }));
+  go("/host/" + code);
+}
+
+// a new room code on the first server that answers: { code, token, at } or null
+async function makeRoom() {
   for (const at of SERVERS[1] ? [0, 1] : [0]) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 6000);
@@ -647,23 +669,13 @@ async function startHosting(q) {
       const r = await fetch(SERVERS[at].replace(/^ws/, "http") + "/api/new", { method: "POST", signal: ctl.signal });
       if (!r.ok) throw new Error(r.status);
       const { code, token } = await r.json();
-      const questions = bare(q.questions).map((x, i) => {
-        const aimg = q.questions[i].aimg;
-        return aimg && x.answers ? { ...x, answers: x.answers.map((a, j) => (a.trim() ? a : aimg[j] ? PIC_ONLY : a)) } : x;
-      });
-      const pics = questions.map((x, i) => {
-        const src = q.questions[i];
-        const a = src.aimg && x.answers ? x.answers.map((v, j) => [v, src.aimg[j] || null]).filter(([v]) => v.trim()).map(([, k]) => k) : null;
-        return src.img || a ? { q: src.img || null, a } : null;
-      });
-      sessionStorage.setItem("host:" + code, JSON.stringify({ token, at, quiz: { title: q.title, questions }, pics }));
-      return go("/host/" + code);
+      return { code, token, at };
     } catch {
     } finally {
       clearTimeout(timer);
     }
   }
-  toast(t("Couldn't start. Check the internet and try again."));
+  return null;
 }
 
 // ---------------- live connection (auto-reconnects, two servers) ----------------
@@ -890,8 +902,36 @@ function homeLink() {
   return b;
 }
 
+// an assignment's Start / Next question / See your result: the phone moves on by itself (no big screen)
+function goBtn(m, label) {
+  const b = el("button", "btn primary big goBtn", label);
+  b.onclick = () => { b.disabled = true; live.send({ t: "go", qi: m.qi ?? -1 }); };
+  return b;
+}
+
 function playerView(m) {
   const out = [];
+  if (m.self && m.phase === "intro") {
+    out.push(el("h2", "ptext", m.title || "Ronda"), el("p", "wait", t("{n} questions", { n: m.n })),
+      el("p", "wait", t("Answer by {when}", { when: fmtWhen(m.until) })), goBtn(m, t("Start")));
+    return out;
+  }
+  if (m.self && m.phase === "end") {
+    out.push(el("p", "big-ok", m.done ? t("Finished!") : t("The time to answer is over")));
+    if (m.quizzy) {
+      out.push(el("p", "place", t("{rank} of {of}", { rank: ordinal(m.rank), of: m.of })),
+        el("p", "wait", t("{r} of {n} right · {p} points", { r: m.right, n: m.of2, p: m.score })));
+      const ol = el("ol", "top5");
+      for (const [name, score] of m.top) {
+        const li = el("li", name === m.name ? "me" : "");
+        li.append(el("span", "", name), el("b", "", String(score)));
+        ol.append(li);
+      }
+      out.push(ol);
+    } else out.push(el("p", "wait", t("Thanks for taking part")));
+    out.push(homeLink());
+    return out;
+  }
   if (m.phase === "lobby") {
     out.push(el("p", "big-ok", t("You're in!")), el("p", "wait", t("Look at the screen. It starts soon.")));
     if (m.teams) {
@@ -926,7 +966,8 @@ function playerView(m) {
     if (m.endsIn) {
       const tb = timerBar();
       out.push(tb);
-      requestAnimationFrame(() => countdown(tb, m.endsIn, m.readIn));
+      // an assignment: when the time is up the phone says so and the answer shows
+      requestAnimationFrame(() => countdown(tb, m.endsIn, m.readIn, m.self ? () => live.send({ t: "go", qi: m.qi }) : null));
     }
     if (m.kind === "quiz" || m.kind === "poll") {
       if (m.mine != null) {
@@ -996,6 +1037,7 @@ function playerView(m) {
         out.push(f);
         setTimeout(() => inp.focus(), 50);
       } else out.push(el("p", "wait", t("Sent.")));
+      if (m.self) out.push(goBtn(m, mine.length ? t("Next") : t("Skip")));
     }
     return out;
   }
@@ -1026,8 +1068,10 @@ function playerView(m) {
       out.push(el("p", "place", t("{team} is {rank}", { team: m.team.name, rank: ordinal(m.rank) })));
     } else out.push(el("p", "place", t("You're {rank}", { rank: ordinal(m.rank) })));
   } else {
-    out.push(el("p", "big-ok", t("Thanks!")), el("p", "wait", t("Look at the screen for the results.")));
+    out.push(el("p", "big-ok", t("Thanks!")));
+    if (!m.self) out.push(el("p", "wait", t("Look at the screen for the results.")));
   }
+  if (m.self) out.push(goBtn(m, m.last ? t("See your result") : t("Next question")));
   return out;
 }
 
@@ -1691,6 +1735,292 @@ function saveResults(m) {
   const csv = "﻿" + rows.map((r) => r.map(esc).join(",")).join("\r\n");
   downloadFile((m.quiz.title || "Ronda") + " - " + t("results") + ".csv", csv, "text/csv");
   toast(t("Results saved to your downloads"));
+}
+
+// ---------------- assignments (like Kahoot's "Assign") ----------------
+// No big screen: everyone plays the whole ronda on their own phone, at their own pace, until a deadline (up to 28
+// days ahead, like Kahoot's). The host's device keeps each assignment's code and key; its report shows who started,
+// who finished, everyone's points and answers, and each question; the deadline can be moved or ended early.
+const MAX_DAYS = 28; // the same as the server's
+const DAY = 86400000;
+function assignedList() {
+  try {
+    const list = JSON.parse(safeGet("assigned") || "[]");
+    return Array.isArray(list) ? list.filter((r) => r && /^\d{6}$/.test(r.code) && Date.now() < r.until + 30 * DAY) : [];
+  } catch { return []; }
+}
+function saveAssigned(list) { safeSet("assigned", JSON.stringify(list)); }
+function putAssigned(rec) { saveAssigned([rec, ...assignedList().filter((r) => r.code !== rec.code)]); }
+function dropAssigned(code) { saveAssigned(assignedList().filter((r) => r.code !== code)); }
+
+// "2026-11-27T18:00" for a datetime input, in this device's time
+const toLocalInput = (ms) => new Date(ms - new Date(ms).getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+
+function openAssign(q) {
+  const picOnly = q.questions.findIndex((x) => x.answers && x.aimg?.some((k, j) => k && !x.answers[j]?.trim()));
+  const msg = problems(q) || (picOnly >= 0 ? t("Question {n}: an answer that is only a picture needs words to be assigned", { n: picOnly + 1 }) : null);
+  if (msg) {
+    if (here() !== "/edit/" + q.id) go("/edit/" + q.id);
+    $("#editMsg").textContent = msg;
+    $("#editMsg").hidden = false;
+    return;
+  }
+  const sheet = el("div", "asgSheet");
+  sheet.id = "asgSheet";
+  sheet.setAttribute("role", "dialog");
+  sheet.setAttribute("aria-modal", "true");
+  const box = el("form", "asgBox card");
+  box.noValidate = true;
+  const when = el("input");
+  when.type = "datetime-local";
+  when.name = "until";
+  const hour = 3600000;
+  when.value = toLocalInput(Math.ceil((Date.now() + 7 * DAY) / hour) * hour); // a week from now, on the hour
+  when.min = toLocalInput(Date.now() + 5 * 60000);
+  when.max = toLocalInput(Date.now() + MAX_DAYS * DAY);
+  const mix = el("input");
+  mix.type = "checkbox";
+  mix.name = "mix";
+  mix.checked = true;
+  const mixRow = el("label", "anon");
+  mixRow.append(mix, " " + t("Mix the order of the answers on each phone"));
+  const out = el("p", "msg");
+  out.hidden = true;
+  const cancel = el("button", "btn ghost", t("Cancel"));
+  cancel.type = "button";
+  cancel.onclick = () => sheet.remove();
+  const make = el("button", "btn primary", t("Create assignment"));
+  make.name = "make";
+  const row = el("div", "asgBtns");
+  row.append(cancel, make);
+  box.append(el("h2", "asgHead", t("Assign")),
+    el("p", "small", t("Everyone plays on their own phone, at their own pace, until the time you pick. No big screen.")),
+    el("label", "asgLabel", t("Answer by")), when, mixRow);
+  if (q.questions.some((x) => x.img || x.aimg?.some(Boolean))) box.append(el("p", "small", t("Pictures stay on this device: phones get the words only.")));
+  box.append(out, row);
+  sheet.append(box);
+  sheet.onclick = (e) => { if (e.target === sheet) sheet.remove(); };
+  document.body.append(sheet);
+  setTimeout(() => make.focus(), 50);
+  box.onsubmit = async (e) => {
+    e.preventDefault();
+    const until = new Date(when.value).getTime();
+    if (!(until > Date.now() + 60000) || until > Date.now() + MAX_DAYS * DAY) {
+      out.textContent = t("Pick a time within the next {n} days", { n: MAX_DAYS });
+      out.hidden = false;
+      return;
+    }
+    make.disabled = true;
+    const room = await makeRoom();
+    if (!room) {
+      make.disabled = false;
+      out.textContent = t("Couldn't start. Check the internet and try again.");
+      out.hidden = false;
+      return;
+    }
+    const quiz = { title: q.title, questions: bare(q.questions) };
+    const rec = { code: room.code, token: room.token, at: room.at, title: q.title || "Ronda", until, made: Date.now() };
+    closeLive();
+    live = connect(room.code, () => {
+      live.send({ t: "host", token: room.token });
+      live.send({ t: "assign", quiz, until, mix: mix.checked });
+    }, (m) => {
+      if (m.t === "report") {
+        putAssigned(rec);
+        sheet.remove();
+        go("/report/" + room.code);
+      } else if (m.t === "bad-quiz" || m.t === "bad-until") {
+        closeLive();
+        make.disabled = false;
+        out.textContent = m.t === "bad-until" ? t("Pick a time within the next {n} days", { n: MAX_DAYS }) : t("Couldn't start. Check the internet and try again.");
+        out.hidden = false;
+      }
+    }, { at: room.at, patience: Infinity });
+  };
+}
+$("#assignBtn").onclick = () => {
+  putQuiz(editing);
+  openAssign(editing);
+};
+
+// two taps for what can't be undone (no dialogs)
+function armed(b, again, act) {
+  const label = b.textContent;
+  b.onclick = () => {
+    if (!b.dataset.armed) {
+      b.dataset.armed = "1";
+      b.textContent = again;
+      setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = label; } }, 3000);
+      return;
+    }
+    act();
+  };
+  return b;
+}
+
+function reportScreen(code) {
+  const rec = assignedList().find((r) => r.code === code);
+  if (!rec) return go("/", true);
+  show("report");
+  $("#rTitle").textContent = rec.title;
+  $("#rMain").replaceChildren(el("p", "small", t("Loading…")));
+  $("#rCtl").replaceChildren();
+  drawShare(code);
+  let editingUntil = false;
+  live = connect(code, () => live.send({ t: "host", token: rec.token }), (m) => {
+    if (m.t === "gone" || m.t === "closed" || m.t === "denied") {
+      dropAssigned(code);
+      closeLive();
+      if (m.t === "closed") { toast(t("Deleted")); return go("/", true); }
+      $("#rShare").hidden = true;
+      $("#rCtl").replaceChildren();
+      return $("#rMain").replaceChildren(el("p", "", t("This assignment isn't there any more.")));
+    }
+    if (m.t !== "report") return;
+    rec.until = m.until;
+    putAssigned(rec);
+    if (!editingUntil) drawCtl(m);
+    drawReport(m);
+  }, { at: rec.at, patience: Infinity });
+
+  function drawCtl(m) {
+    const state = el("p", "rState " + (m.open ? "on" : "off"),
+      m.open ? t("Open until {when}", { when: fmtWhen(m.until) }) : t("Closed {when}. The results stay here until {keep}.", { when: fmtWhen(m.until), keep: fmtWhen(m.keep) }));
+    $("#rShare").hidden = !m.open;
+    const btns = el("div", "rBtns");
+    if (m.open) {
+      const move = el("button", "btn chip", t("Change the deadline"));
+      move.onclick = () => {
+        editingUntil = true;
+        const f = el("form", "rUntil");
+        const inp = el("input");
+        inp.type = "datetime-local";
+        inp.name = "until";
+        inp.value = toLocalInput(m.until);
+        inp.min = toLocalInput(Date.now() + 5 * 60000);
+        inp.max = toLocalInput(Date.now() + MAX_DAYS * DAY);
+        const set = el("button", "btn primary", t("Set"));
+        const no = el("button", "btn ghost", t("Cancel"));
+        no.type = "button";
+        no.onclick = () => { editingUntil = false; drawCtl(m); };
+        f.append(inp, set, no);
+        f.onsubmit = (e) => {
+          e.preventDefault();
+          const u = new Date(inp.value).getTime();
+          if (!(u > Date.now() + 60000) || u > Date.now() + MAX_DAYS * DAY) return toast(t("Pick a time within the next {n} days", { n: MAX_DAYS }));
+          editingUntil = false;
+          live.send({ t: "until", until: u });
+        };
+        btns.replaceWith(f);
+        inp.focus();
+      };
+      btns.append(move, armed(el("button", "btn chip", t("End now")), t("Tap again to end it"), () => live.send({ t: "end" })));
+    }
+    const save = el("button", "btn chip", t("Download results"));
+    save.onclick = () => saveResults(asResults(m));
+    btns.append(save, armed(el("button", "btn chip danger-text", t("Delete")), t("Tap again to delete"), () => live.send({ t: "close" })));
+    $("#rCtl").replaceChildren(state, btns);
+  }
+}
+
+function drawShare(code) {
+  const link = location.origin + BASE + code + location.search;
+  const box = $("#rShare");
+  box.hidden = false;
+  const copy = el("button", "btn primary", t("Copy link"));
+  copy.onclick = async () => {
+    try { await navigator.clipboard.writeText(link); toast(t("Link copied")); } catch { toast(link, 8000); }
+  };
+  const left = el("div", "rShareText");
+  left.append(el("p", "small", t("Send the link, or people enter the code at {site}", { site: location.host + BASE.replace(/\/$/, "") })),
+    el("p", "rCode", fmtCode(code)), el("p", "rLink", link), copy);
+  box.replaceChildren(left);
+  try { box.append(qr(link)); } catch {}
+}
+
+// the report as saveResults() takes a live game's
+function asResults(m) {
+  return {
+    quiz: m.quiz,
+    teams: null,
+    players: Object.fromEntries(m.people.map((p) => [p.id, { name: p.name, score: p.score }])),
+    log: m.quiz.questions.map((_, i) => Object.fromEntries(m.people.filter((p) => p.ans[i] != null).map((p) => [p.id, p.ans[i]]))),
+  };
+}
+
+function drawReport(m) {
+  const qs = m.quiz.questions;
+  const n = qs.length;
+  const scoredQs = qs.map((q, i) => i).filter((i) => scored(qs[i].kind));
+  const done = m.people.filter((p) => p.done).length;
+  const out = [el("h2", "sub", t("People: {n} · {d} finished", { n: m.people.length, d: done }))];
+  if (!m.people.length) out.push(el("p", "small", t("Nobody yet. Send the link or the code.")));
+  else {
+    const tbl = el("table", "rPeople");
+    const head = el("tr");
+    for (const h of [t("Name"), t("Progress"), ...(scoredQs.length ? [t("Right"), t("Points")] : []), ""]) head.append(el("th", "", h));
+    tbl.append(head);
+    for (const p of m.people) {
+      const tr = el("tr");
+      tr.dataset.id = p.id;
+      const prog = p.done ? t("Finished") : !p.started ? t("Not started") : !m.open ? t("Didn't finish ({a} of {n})", { a: p.at, n }) : t("{a} of {n}", { a: p.at, n });
+      const right = scoredQs.filter((i) => p.ans[i] != null && isRight(qs[i], p.ans[i])).length;
+      tr.append(el("td", "", p.name), el("td", p.done ? "ok" : "", prog));
+      if (scoredQs.length) tr.append(el("td", "", `${right} / ${scoredQs.length}`), el("td", "", String(p.score)));
+      const td = el("td");
+      td.append(armed(el("button", "btn chip rm", t("Remove")), t("Tap again"), () => live.send({ t: "remove", id: p.id })));
+      tr.append(td);
+      tbl.append(tr);
+    }
+    const wrap = el("div", "rTable");
+    wrap.append(tbl);
+    out.push(wrap);
+  }
+  out.push(el("h2", "sub", t("Questions")));
+  const ol = el("ol", "rQs");
+  qs.forEach((q, i) => {
+    const vals = m.people.map((p) => p.ans[i]).filter((v) => v != null);
+    const li = el("li", "rQ");
+    li.append(el("b", "", q.text));
+    if (scored(q.kind)) {
+      const ok = vals.filter((v) => isRight(q, v)).length;
+      const pct = vals.length ? Math.round((100 * ok) / vals.length) : 0;
+      const bar = el("div", "rBar");
+      bar.style.setProperty("--p", pct + "%");
+      li.append(el("p", "small", t("{p}% right · {n} answered", { p: pct, n: vals.length })), bar);
+    } else li.append(el("p", "small", t("{n} answered", { n: vals.length })));
+    if (q.answers && (q.kind === "quiz" || q.kind === "poll")) {
+      const ul = el("ul", "rAns");
+      q.answers.forEach((a, j) => {
+        const c = vals.filter((v) => v === j).length;
+        ul.append(el("li", q.kind === "quiz" && q.correct.includes(j) ? "ok" : "", `${LETTERS[j]}: ${a} · ${c}`));
+      });
+      li.append(ul);
+    } else if (q.kind === "scale" && vals.length) {
+      li.append(el("p", "small", t("Average {a}", { a: (vals.reduce((x, y) => x + y, 0) / vals.length).toFixed(1) })));
+    } else if (q.kind === "words" && vals.length) {
+      const c = {};
+      for (const list of vals) for (const w of list) c[w] = (c[w] || 0) + 1;
+      li.append(el("p", "small", Object.entries(c).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([w, k]) => `${w} (${k})`).join(" · ")));
+    }
+    ol.append(li);
+  });
+  out.push(ol);
+  $("#rMain").replaceChildren(...out);
+}
+
+// the assignments this device made, on the start page
+function drawAssigned() {
+  const list = assignedList();
+  $("#asgWrap").hidden = !list.length;
+  $("#asg").replaceChildren(...list.map((r) => {
+    const li = el("li", "mineRow");
+    const open = el("button", "mineOpen");
+    open.append(el("b", "", r.title), el("span", "small", Date.now() < r.until ? t("Open until {when}", { when: fmtWhen(r.until) }) : t("Closed")));
+    open.onclick = () => go("/report/" + r.code);
+    li.append(open);
+    return li;
+  }));
 }
 
 // ---------------- start ----------------

@@ -29,6 +29,10 @@
       <h2 class="sub">Your rondas</h2>
       <ul id="mine" class="mine"></ul>
     </div>
+    <div id="asgWrap" hidden>
+      <h2 class="sub">Assigned</h2>
+      <ul id="asg" class="mine"></ul>
+    </div>
     <p class="small foot">Free, no account, no player limit · Open source · <a href="https://github.com/kleiders3010/ronda">GitHub</a> · <a href="/privacy">Privacy</a> · <a href="#" class="fbOpen">Send feedback</a></p>
   </div>
 </section>
@@ -84,8 +88,23 @@
     <button id="shareBtn" class="btn ghost">Share</button>
     <button id="fileBtn" class="btn ghost">Save as file</button>
     <button id="delBtn" class="btn ghost danger-text">Delete</button>
+    <button id="assignBtn" class="btn ghost">Assign</button>
     <button id="startBtn" class="btn primary big">Start</button>
   </footer>
+</section>
+
+<!-- An assignment's report (people play on their own, until a deadline) -->
+<section id="report" class="page light" hidden>
+  <header class="ebar">
+    <button class="btn link" data-home>‹ Rondas</button>
+    <span class="small">Assigned</span>
+  </header>
+  <div class="col wide-col">
+    <h1 id="rTitle" class="rTitle"></h1>
+    <div id="rShare" class="card rShare"></div>
+    <div id="rCtl" class="rCtl"></div>
+    <div id="rMain" class="rMain"></div>
+  </div>
 </section>
 
 <!-- Host screen (big screen) -->

@@ -342,3 +342,44 @@ div.typed .chip.ok { outline: 2px solid #86efac; }
 .btn.chip.rmWho { font-size: 14px; background: transparent; color: #fda4af; border-color: #9f1239; }
 .teamsTop .nm { display: inline-flex; align-items: center; gap: 12px; }
 .teamsTop .tgain { color: #86efac; font-size: .75em; }
+
+/* assignments (like Kahoot's "Assign"): the Assign sheet, the phone's Next, the host's report */
+.asgSheet { position: fixed; inset: 0; z-index: 20; background: rgba(20, 17, 43, .55); display: flex; align-items: flex-end; justify-content: center; }
+.asgBox { width: 100%; max-width: 460px; border-radius: 18px 18px 0 0; padding-bottom: max(20px, env(safe-area-inset-bottom)); }
+@media (min-width: 641px) { .asgSheet { align-items: center; } .asgBox { border-radius: 18px; } }
+.asgHead { margin: 0; font-size: 22px; }
+.asgLabel { font-weight: 700; margin-top: 4px; }
+.asgBtns { display: flex; gap: 10px; justify-content: flex-end; }
+.goBtn { align-self: center; margin-top: 10px; }
+.top5 { list-style: none; margin: 4px auto 0; padding: 0; width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 6px; counter-reset: top; }
+.top5 li { display: flex; gap: 10px; align-items: center; padding: 10px 14px; border-radius: 12px; background: var(--night2); counter-increment: top; text-align: left; }
+.top5 li::before { content: counter(top); color: #a59fc9; font-weight: 700; min-width: 1.2em; }
+.top5 li span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.top5 li.me { outline: 2px solid #c4b5fd; }
+.rTitle { margin: 0; font-size: 26px; overflow-wrap: anywhere; }
+.rShare { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 16px; }
+.rShareText { flex: 1 1 220px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.rShareText p { margin: 0; }
+.rCode { font-size: 38px; font-weight: 800; letter-spacing: 2px; }
+.rLink { font-size: 14px; overflow-wrap: anywhere; color: var(--muted); }
+.rShare .qr { width: 140px; height: 140px; border-radius: 8px; }
+.rState { margin: 0; font-weight: 700; }
+.rState.on { color: #15803d; }
+.rState.off { color: var(--muted); }
+.rBtns, .rUntil { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.rUntil input { width: auto; flex: 1 1 200px; }
+.rTable { overflow-x: auto; background: var(--card); border-radius: var(--radius); }
+.rPeople { width: 100%; border-collapse: collapse; font-size: 15px; }
+.rPeople th, .rPeople td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.rPeople th { font-size: 13px; color: var(--muted); font-weight: 600; }
+.rPeople td:first-child { white-space: normal; overflow-wrap: anywhere; font-weight: 600; }
+.rPeople td.ok { color: #15803d; font-weight: 600; }
+.rPeople tr:last-child td { border-bottom: 0; }
+.btn.chip.rm { padding: 4px 12px; font-size: 13px; color: #b91c1c; }
+.rQs { margin: 0; padding-left: 26px; display: flex; flex-direction: column; gap: 12px; }
+.rQ p { margin: 4px 0; }
+.rBar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; max-width: 320px; }
+.rBar::before { content: ""; display: block; height: 100%; width: var(--p); background: #15803d; border-radius: 4px; }
+.rAns { margin: 4px 0 0; padding-left: 18px; font-size: 15px; color: var(--muted); }
+.rAns li.ok { color: #15803d; font-weight: 600; }
+.rAns li.ok::after { content: " ✓"; }
