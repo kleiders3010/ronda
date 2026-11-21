@@ -61,7 +61,7 @@ with sync_playwright() as p:
     for j, a in enumerate(["Pacific", "Atlantic", "Indian", "Arctic"]):
         ins.nth(j).fill(a)
     h.locator(".qcard input[name=picFile]").set_input_files(str(photo))
-    h.wait_for_function("document.querySelector('.picThumb')?.naturalWidth > 0", timeout=10000)
+    h.wait_for_function("() => document.querySelector('.picThumb')?.naturalWidth > 0", timeout=10000)
     size = h.evaluate("() => { const i = document.querySelector('.picThumb'); return [i.naturalWidth, i.naturalHeight] }")
     check(size == [1280, 853] or size == [1280, 854], f"a 3000x2000 photo is shrunk to 1280 wide ({size})")
     # question 2: a picture, and answers that are pictures (B, a picture only, is right)
@@ -69,10 +69,10 @@ with sync_playwright() as p:
     q2 = h.locator(".qcard").nth(1)
     q2.locator(".qtext").fill("Which one is the Moon?")
     q2.locator("input[name=picFile]").set_input_files(str(pics["moon"]))
-    h.wait_for_function("document.querySelectorAll('.qcard')[1].querySelector('.picThumb')?.naturalWidth > 0", timeout=10000)
+    h.wait_for_function("() => document.querySelectorAll('.qcard')[1].querySelector('.picThumb')?.naturalWidth > 0", timeout=10000)
     for j, key in ((0, "a"), (1, "b"), (2, "c")):
         h.locator(".qcard").nth(1).locator(".aedit").nth(j).locator("input[name=answerPicFile]").set_input_files(str(pics[key]))
-        h.wait_for_function(f"document.querySelectorAll('.qcard')[1].querySelectorAll('.aedit')[{j}].querySelector('.apicThumb')?.naturalWidth > 0", timeout=10000)
+        h.wait_for_function(f"() => document.querySelectorAll('.qcard')[1].querySelectorAll('.aedit')[{j}].querySelector('.apicThumb')?.naturalWidth > 0", timeout=10000)
     a2 = h.locator(".qcard").nth(1).locator(".aedit input:not([type=file])")
     a2.nth(2).fill("Mars")
     a2.nth(3).fill("Venus")
@@ -81,7 +81,7 @@ with sync_playwright() as p:
     check(h.evaluate("document.querySelectorAll('.qcard')[1].querySelectorAll('.aedit input:not([type=file])')[0].placeholder") == "Words (optional)",
           "an answer with a picture asks for words only optionally")
     h.wait_for_timeout(700)  # saved
-    stored = h.evaluate("localStorage.getItem('rondas')")
+    stored = h.evaluate("localStorage.getItem('ronda.rondas')")
     check("data:image" not in stored and '"img":"p:' in stored and len(stored) < 3000,
           f"the ronda in localStorage holds only the picture's key ({len(stored)} chars)")
     check(h.evaluate(PIC_COUNT) == 5, "the pictures are in the device's picture store (5)")
@@ -105,15 +105,15 @@ with sync_playwright() as p:
     pl.goto(f"{SITE}/{code}")
     pl.fill("#nameInput", "Ana")
     pl.press("#nameInput", "Enter")
-    h.wait_for_function("document.body.textContent.includes('Ana')", timeout=30000)
+    h.wait_for_function("() => document.body.textContent.includes('Ana')", timeout=30000)
     h.click("#hNext")
-    h.wait_for_function("document.querySelector('.qimg')?.naturalWidth > 0", timeout=30000)
+    h.wait_for_function("() => document.querySelector('.qimg')?.naturalWidth > 0", timeout=30000)
     h.wait_for_timeout(600)
     ih = h.evaluate("document.querySelector('.qimg').getBoundingClientRect().height")
     check(ih > 180, f"the big screen shows the picture large ({ih:.0f}px high at 720)")
     seen = h.evaluate(IN_VIEW, ".htext, .qimg, .ha, #hNext")
     check(len(seen) == 7 and all(seen), f"question, picture, 4 answers and Next all on a 1280x720 screen ({seen})")
-    pl.wait_for_function("document.querySelectorAll('.pa').length === 4", timeout=30000)
+    pl.wait_for_function("() => document.querySelectorAll('.pa').length === 4", timeout=30000)
     check(pl.evaluate("[...document.querySelectorAll('img')].filter(i => i.src.startsWith('data:') || i.classList.contains('qimg')).length") == 0, "the player's phone shows only the answer tiles")
     big = [f for f in sent if "data:image" in f or '"img"' in f or '"aimg"' in f]
     check(sent and not big, f"nothing the host sent to the server carries the picture ({len(sent)} messages)")
@@ -122,7 +122,7 @@ with sync_playwright() as p:
     h.click("#hNext")  # ranking
     h.wait_for_selector(".board", timeout=30000)
     h.click("#hNext")  # question 2
-    h.wait_for_function("document.querySelectorAll('.ha .aimg').length === 3 && [...document.querySelectorAll('.ha .aimg, .qimg')].every(i => i.naturalWidth > 0)", timeout=30000)
+    h.wait_for_function("() => document.querySelectorAll('.ha .aimg').length === 3 && [...document.querySelectorAll('.ha .aimg, .qimg')].every(i => i.naturalWidth > 0)", timeout=30000)
     h.wait_for_timeout(600)
     hs = h.evaluate("[...document.querySelectorAll('.ha .aimg')].map(i => Math.round(i.getBoundingClientRect().height))")
     check(min(hs) >= 60, f"answer pictures are big enough to tell apart on the big screen ({hs}px)")
@@ -130,7 +130,7 @@ with sync_playwright() as p:
     check(len(seen) == 7 and all(seen), f"question, its picture, 4 picture answers and Next all on 1280x720 ({seen})")
     texts = h.evaluate("[...document.querySelectorAll('.ha .atext')].map(e => e.textContent)")
     check(texts == ["", "", "Mars", "Venus"], f"picture-only answers show no placeholder text on the big screen ({texts})")
-    pl.wait_for_function("document.querySelectorAll('.pa').length === 4 && document.body.textContent.includes('Venus')", timeout=30000)
+    pl.wait_for_function("() => document.querySelectorAll('.pa').length === 4 && document.body.textContent.includes('Venus')", timeout=30000)
     ptexts = pl.evaluate("[...document.querySelectorAll('.pa .atext')].map(e => e.textContent)")
     check(ptexts == ["", "", "Mars", "Venus"], f"phones show picture-only answers by letter and colour, like Kahoot ({ptexts})")
     pl.screenshot(path=str(tmp / "phone2.png"))
@@ -147,9 +147,9 @@ with sync_playwright() as p:
     o = page(1280, 720)
     o.goto(SITE + "/")
     o.locator("#importFile").set_input_files(str(tmp / "ronda.json"))
-    o.wait_for_function("document.querySelector('.picThumb')?.naturalWidth > 0", timeout=10000)
+    o.wait_for_function("() => document.querySelector('.picThumb')?.naturalWidth > 0", timeout=10000)
     check(True, "opening the saved file on another device brings the picture back")
-    check('"img":"p:' in o.evaluate("localStorage.getItem('rondas')"), "...kept there as a key too")
+    check('"img":"p:' in o.evaluate("localStorage.getItem('ronda.rondas')"), "...kept there as a key too")
 
     # removing it, then going home, cleans the store
     o.click("button[name=dropPic]")

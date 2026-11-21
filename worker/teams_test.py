@@ -80,7 +80,7 @@ with sync_playwright() as p:
 
     h = page()
     h.goto(SITE + "/" + QS)
-    h.evaluate("q => localStorage.setItem('rondas', JSON.stringify([q]))", Q)
+    h.evaluate("q => localStorage.setItem('ronda.rondas', JSON.stringify([q]))", Q)
     h.reload()
     h.click(".mineRow .btn.primary")
     h.wait_for_url(lambda u: "/host/" in u, timeout=30000)
@@ -92,15 +92,15 @@ with sync_playwright() as p:
         pg.fill("#nameInput", n)
         pg.press("#nameInput", "Enter")
         pl[n] = pg
-    h.wait_for_function("document.querySelectorAll('.people .who').length === 4", timeout=30000)
+    h.wait_for_function("() => document.querySelectorAll('.people .who').length === 4", timeout=30000)
 
     # teams on: three to start (like Kahoot), then two
     check(not h.is_checked("#teamsOn") and h.locator(".tcount").is_hidden(), "a ronda starts without teams")
     h.check("#teamsOn")
-    h.wait_for_function("document.querySelectorAll('.teamCol').length === 3", timeout=15000)
+    h.wait_for_function("() => document.querySelectorAll('.teamCol').length === 3", timeout=15000)
     check(h.is_checked("#talkOn"), "team talk is on by itself")  # pinned: Kahoot turns team talk on by default
     h.click(".tminus")
-    h.wait_for_function("document.querySelectorAll('.teamCol').length === 2", timeout=15000)
+    h.wait_for_function("() => document.querySelectorAll('.teamCol').length === 2", timeout=15000)
     sizes = [h.locator(".teamCol").nth(k).locator(".who").count() for k in range(2)]
     check(sizes == [2, 2], f"people are spread evenly over the teams ({sizes})")
     check(h.locator(".tminus").is_disabled(), "two teams at least")
@@ -115,18 +115,18 @@ with sync_playwright() as p:
     check(pm.locator(".tpick").count() == 2 and pm.locator(".tpick[aria-pressed=true]").count() == 1, "phones see the teams and theirs")
     shot(pm, "1-phone-lobby")
     pm.locator(".tpick").nth(0).click()
-    h.wait_for_function("document.querySelectorAll('.teamCol')[0].querySelectorAll('.who').length === 3", timeout=15000)
+    h.wait_for_function("() => document.querySelectorAll('.teamCol')[0].querySelectorAll('.who').length === 3", timeout=15000)
     check(team_of(mover) == 0, f"{mover} switched team from the phone")
     # the host moves them back
     h.locator(".teamCol .who", has_text=mover).click()
     check(h.locator(".rmWho").count() == 1 and h.locator(".moveHere").count() == 1, "tapping a name offers moving it or removing it")
     h.locator(".teamCol").nth(1).locator(".moveHere").click()
-    h.wait_for_function("document.querySelectorAll('.teamCol')[1].querySelectorAll('.who').length === 2", timeout=15000)
+    h.wait_for_function("() => document.querySelectorAll('.teamCol')[1].querySelectorAll('.who').length === 2", timeout=15000)
     check(team_of(mover) == 1, "the host moved them to the other team")
     # the host renames a team; phones see the new name
     h.locator(".tname").nth(0).fill("Reds")
     h.locator(".tname").nth(0).press("Enter")
-    pl[first[0]].wait_for_function("document.querySelector('#pTeam').textContent.includes('Reds')", timeout=15000)
+    pl[first[0]].wait_for_function("() => document.querySelector('#pTeam').textContent.includes('Reds')", timeout=15000)
     check(True, "a renamed team shows on its phones")
     shot(h, "2-screen-lobby")
 

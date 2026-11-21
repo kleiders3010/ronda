@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'self'; script-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://quiz.jurisgames.com wss://quiz.jurisgames.com https://games.jurisgames.com wss://games.jurisgames.com https://feedback.jurisgames.com http://127.0.0.1:* ws://127.0.0.1:* http://localhost:* ws://localhost:*">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ronda · Privacy</title>
 <link rel="icon" href="/img/icon-192.png">
@@ -13,7 +14,7 @@
 </head>
 <body>
 <h1>Ronda: privacy</h1>
-<p>Last updated: 19 November 2026. Ronda is free, open-source live quizzes and polls by Juris Games
+<p>Last updated: 21 November 2026. Ronda is free, open-source live quizzes and polls by Juris Games
 (<a href="https://github.com/kleiders3010/ronda">source code</a>). The Android app opens the same web app
 at quiz.jurisgames.com.</p>
 
@@ -28,11 +29,13 @@ at quiz.jurisgames.com.</p>
     them in the file.</li>
   <li><b>While a ronda is live</b>, our server holds the questions, the names people type, their teams (in a team game) and their answers and
     points, so it can run the game. It deletes all of it when the host closes the room, and at the latest
-    6 hours after the last activity.</li>
+    6 hours after the last activity. Each phone makes a new random id for every ronda it joins, so it can come back
+    to it; the host and the server see only a scrambled form of that id, which can't be turned back into it.</li>
   <li><b>An assignment</b> (people play on their own until a deadline) is kept on the one server that made it: the questions, the names
-    people type, their answers and points, and where each person is in it. The host sees all of it in the report. It is all deleted
+    people type, their answers and points, and where each person is in it. Only its link opens it (the code alone does not). The host
+    sees all of it in the report; the others see the top 5 names and points when they finish only if the host turns that on. It is all deleted
     when the host deletes the assignment, and at the latest 30 days after its deadline. The host's device keeps the code and the
-    key to see the report; each phone keeps a random id, so it can come back to where it was.</li>
+    key to see the report; each phone keeps its random id for that ronda, so it can come back to where it was.</li>
   <li><b>Your name</b> is shown to the host and the people in the same ronda and saved only on your device.</li>
   <li><b>Audience questions</b> are shown with your name, or without it if you tick "Ask anonymously": then neither
     the host nor the others see who asked (the server knows, only to mark it as yours and to limit how many one person
@@ -42,7 +45,7 @@ at quiz.jurisgames.com.</p>
 </ul>
 
 <h2>The server</h2>
-<p>Ronda runs on Cloudflare Workers, and live rooms also on our own game server (games.jurisgames.com, a rented server reached through Cloudflare), so a ronda keeps going if one of them stops: the host's screen moves it to the other with its questions, names and points. Both delete everything the same way. Our game server keeps no logs of who connects; to stop floods it counts, for one minute and only in memory, how many rondas each address starts. The pages are also published on GitHub Pages (kleiders3010.github.io/ronda), so the app opens even when quiz.jurisgames.com does not; GitHub serves that copy and may keep standard visit logs, and its rondas use the same two servers. Cloudflare may keep standard security logs.</p>
+<p>Ronda runs on Cloudflare Workers, and live rooms also on our own game server (games.jurisgames.com, a rented server reached through Cloudflare), so a ronda keeps going if one of them stops: the host's screen moves it to the other with its questions, names and points. Both delete everything the same way. Our game server keeps no logs of who connects. To stop floods, both servers count, for one minute, how many rondas each address starts and how many codes it tries, under a one-way code of the address that changes every day (never the address itself); our game server keeps these counts only in memory. The pages are also published on GitHub Pages (kleiders3010.github.io/ronda), so the app opens even when quiz.jurisgames.com does not; GitHub serves that copy and may keep standard visit logs, and its rondas use the same two servers. Cloudflare may keep standard security logs.</p>
 
 <h2>Feedback</h2>
 <p>"Send feedback" sends what you write, its kind (a problem, an idea, something else) and, only if you type it, your
@@ -53,8 +56,9 @@ which page you are on and how often the live connection dropped. Never quiz cont
 reports per network per day under a one-way code of the network address (never the address itself), deleted the next
 day.</p>
 
-<h2>Children</h2>
-<p>Ronda is a general-audience tool and is not directed at children.</p>
+<h2>Who it's for</h2>
+<p>Ronda is a general-audience tool, made for teachers, hosts and groups. Players need no account and give only a
+name of their choosing: a first name or a nickname is enough, and we suggest that, especially for children.</p>
 
 <h2>Contact</h2>
 <p>hello@jurisgames.com</p>
@@ -66,7 +70,7 @@ day.</p>
 identifique: sin cuentas, sin anuncios, sin analíticas. Lo que escribís en un campo (un nombre, una respuesta, una nota) se envía tal cual, así que si escribís ahí un email o un teléfono también se envía; nunca te lo pedimos, salvo el email opcional para responderte en "Enviar comentarios". Lo que creás se guarda solo en tu dispositivo; un enlace
 para compartir lleva la ronda adentro del enlace. Las imágenes que agregás a preguntas y respuestas quedan en tu dispositivo: solo se ven en tu propia pantalla, nunca se envían a nuestros servidores ni van en un enlace; "Guardar archivo" las pone en el archivo. Mientras una ronda está en vivo, el servidor guarda las
 preguntas, los nombres, los equipos (si se juega en equipos), las respuestas y los puntos para poder jugarla, y lo borra todo cuando se cierra la sala
-o, como máximo, 6 horas después de la última actividad. Ronda funciona en Cloudflare Workers y las salas en vivo también en nuestro propio servidor de juegos (games.jurisgames.com, un servidor alquilado al que se llega a través de Cloudflare), así que si uno se cae la ronda sigue: la pantalla de quien la presenta la pasa al otro con sus preguntas, nombres y puntos. Los dos borran todo igual. Nuestro servidor no guarda registros de quién se conecta; para frenar abusos cuenta, durante un minuto y solo en memoria, cuántas rondas empieza cada dirección. Las páginas también están publicadas en GitHub Pages (kleiders3010.github.io/ronda), para que la app abra aunque quiz.jurisgames.com no ande; GitHub sirve esa copia y puede guardar registros habituales de visitas, y sus rondas usan los mismos dos servidores. "Enviar comentarios" manda lo que escribís, de qué tipo es (un problema, una idea, otra cosa) y, solo si lo escribís, tu email, a feedback.jurisgames.com, que lo envía por email a hello@jurisgames.com sin guardar nada. Con "Incluir detalles técnicos" (tildado al principio; destildalo para no mandarlos, y "Ver lo que se envía" muestra todo antes de enviarlo) también manda tu navegador y sistema, tamaño de pantalla y de ventana, idioma, tipo de conexión, errores recientes de la página y en qué página estás y cuántas veces se cortó la conexión en vivo. Nunca el contenido, los códigos ni los nombres. El email queda en nuestra casilla lo necesario para responder y arreglar las cosas. Para frenar abusos, el servidor cuenta los mensajes por red y por día con un código irreversible de la dirección (nunca la dirección), que se borra al día siguiente.
+o, como máximo, 6 horas después de la última actividad. Cada celular crea un identificador al azar nuevo para cada ronda, para poder volver; quien presenta y el servidor ven solo una forma codificada que no se puede revertir. Una tarea se abre solo con su enlace (el código solo no alcanza), se guarda en el servidor que la creó y se borra cuando quien la creó la borra o, como máximo, 30 días después de su fecha límite; los 5 primeros (nombres y puntos) se muestran al terminar solo si quien la creó lo activa. Ronda funciona en Cloudflare Workers y las salas en vivo también en nuestro propio servidor de juegos (games.jurisgames.com, un servidor alquilado al que se llega a través de Cloudflare), así que si uno se cae la ronda sigue: la pantalla de quien la presenta la pasa al otro con sus preguntas, nombres y puntos. Los dos borran todo igual. Nuestro servidor no guarda registros de quién se conecta. Para frenar abusos, los dos servidores cuentan durante un minuto cuántas rondas empieza y cuántos códigos prueba cada dirección, con un código irreversible de la dirección que cambia cada día (nunca la dirección); nuestro servidor guarda esa cuenta solo en memoria. Las páginas también están publicadas en GitHub Pages (kleiders3010.github.io/ronda), para que la app abra aunque quiz.jurisgames.com no ande; GitHub sirve esa copia y puede guardar registros habituales de visitas, y sus rondas usan los mismos dos servidores. "Enviar comentarios" manda lo que escribís, de qué tipo es (un problema, una idea, otra cosa) y, solo si lo escribís, tu email, a feedback.jurisgames.com, que lo envía por email a hello@jurisgames.com sin guardar nada. Con "Incluir detalles técnicos" (tildado al principio; destildalo para no mandarlos, y "Ver lo que se envía" muestra todo antes de enviarlo) también manda tu navegador y sistema, tamaño de pantalla y de ventana, idioma, tipo de conexión, errores recientes de la página y en qué página estás y cuántas veces se cortó la conexión en vivo. Nunca el contenido, los códigos ni los nombres. El email queda en nuestra casilla lo necesario para responder y arreglar las cosas. Para frenar abusos, el servidor cuenta los mensajes por red y por día con un código irreversible de la dirección (nunca la dirección), que se borra al día siguiente. Ronda es para todo público, pensada para docentes, anfitriones y grupos. Quien juega no necesita cuenta y solo pone un nombre que elige: alcanza con un nombre de pila o un apodo, y lo recomendamos, sobre todo con chicos.
 Contacto: hello@jurisgames.com</p>
 </div>
 </body>

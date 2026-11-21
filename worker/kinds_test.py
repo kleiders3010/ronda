@@ -50,7 +50,7 @@ with sync_playwright() as p:
 
     h = page()
     h.goto(SITE + "/" + QS)
-    h.evaluate("q => localStorage.setItem('rondas', JSON.stringify([q]))", Q)
+    h.evaluate("q => localStorage.setItem('ronda.rondas', JSON.stringify([q]))", Q)
     h.reload()
     h.click(".mineRow .btn.primary")
     h.wait_for_url(lambda u: "/host/" in u, timeout=30000)
@@ -62,7 +62,7 @@ with sync_playwright() as p:
         pg.fill("#nameInput", n)
         pg.press("#nameInput", "Enter")
         pl[n] = pg
-    h.wait_for_function("document.body.textContent.includes('Beto')", timeout=30000)
+    h.wait_for_function("() => document.body.textContent.includes('Beto')", timeout=30000)
 
     # type answer
     h.click("#hNext")
@@ -94,7 +94,7 @@ with sync_playwright() as p:
     for s in reversed(STEPS):
         pl["Beto"].click(f".pAnswers.order .pa:has-text('{s}')")
     pl["Beto"].click("#pMain button[name=sendOrder]")
-    h.wait_for_function("document.querySelector('.avg')?.textContent.includes('1 of 2')", timeout=30000)
+    h.wait_for_function("() => document.querySelector('.avg')?.textContent.includes('1 of 2')", timeout=30000)
     check([x.inner_text().strip() for x in h.query_selector_all(".hAnswers.order .atext")] == STEPS, "the screen shows the right order and 1 of 2")
     pl["Ana"].wait_for_selector(".big-ok", timeout=15000)
     pl["Beto"].wait_for_selector(".big-no", timeout=15000)

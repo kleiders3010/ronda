@@ -70,7 +70,7 @@ try:
         def host_start():
             h = page()
             h.goto(SITE + "/" + QS)
-            h.evaluate("q => localStorage.setItem('rondas', JSON.stringify([q]))", Q)
+            h.evaluate("q => localStorage.setItem('ronda.rondas', JSON.stringify([q]))", Q)
             h.reload()
             h.click(".mineRow .btn.primary")
             h.wait_for_url(lambda u: "/host/" in u, timeout=30000)
@@ -103,11 +103,11 @@ try:
         h, code = host_start()
         check(side(code) == 0, f"a ronda starts on the first server (code {code}, even)")
         ana, beto = join(code, "Ana"), join(code, "Beto")
-        h.wait_for_function("document.body.textContent.includes('Beto') && document.body.textContent.includes('Ana')", timeout=15000)
+        h.wait_for_function("() => document.body.textContent.includes('Beto') && document.body.textContent.includes('Ana')", timeout=15000)
         h.click("#hNext")  # question 1
         answer(ana, 0)
         answer(beto, 1)
-        ana.wait_for_function("document.getElementById('pScore').textContent.includes('points')", timeout=15000)
+        ana.wait_for_function("() => document.getElementById('pScore').textContent.includes('points')", timeout=15000)
         s1 = score(ana)
         check("points" in s1 and pts(beto) == 0, f"question 1 played: Ana scores ({s1}), Beto doesn't")
         ana.click("#pQa")
@@ -116,25 +116,25 @@ try:
         beto.click("#pQa")
         beto.wait_for_selector("#pQaList button[name=vote]", timeout=15000)
         beto.click("#pQaList button[name=vote]")
-        h.wait_for_function("document.getElementById('hQa').textContent.includes('1')", timeout=15000)
+        h.wait_for_function("() => document.getElementById('hQa').textContent.includes('1')", timeout=15000)
         h.wait_for_timeout(1700)  # the host's copy is written every 1.5 s
 
         # its server dies in the middle of the game
         down(0)
         t0 = time.time()
         h.click("#hNext")  # the ranking (pressed while the server is gone: it waits)
-        h.wait_for_function("document.querySelector('#hMain') && !document.body.textContent.includes('Opening the room')", timeout=30000)
-        h.wait_for_function(f"(() => {{ const s = JSON.parse(sessionStorage.getItem('host:{code}') || '{{}}'); return s.at === 1 }})()", timeout=30000)
+        h.wait_for_function("() => document.querySelector('#hMain') && !document.body.textContent.includes('Opening the room')", timeout=30000)
+        h.wait_for_function(f"() => (() => {{ const s = JSON.parse(sessionStorage.getItem('ronda.host:{code}') || '{{}}'); return s.at === 1 }})()", timeout=30000)
         check(True, f"the server dies: the host's screen moves the ronda to the other one ({time.time() - t0:.0f} s)")
-        ana.wait_for_function("document.getElementById('pScore').textContent.includes('points')", timeout=30000)
+        ana.wait_for_function("() => document.getElementById('pScore').textContent.includes('points')", timeout=30000)
         check(score(ana) == s1, f"Ana's points came along ({score(ana)})")
-        beto.wait_for_function("document.querySelector('#pQaList')?.innerText.includes('slides')", timeout=30000)
+        beto.wait_for_function("() => document.querySelector('#pQaList')?.innerText.includes('slides')", timeout=30000)
         check(beto.get_attribute("#pQaList button[name=vote]", "aria-pressed") == "true" and "1" in beto.inner_text("#pQaList button[name=vote]"),
               "the audience question and Beto's vote came along")
         beto.click("#pQaClose")
         ana.click("#pQaClose")
         caro = join(code, "Caro")  # joins late, while the first server is still down
-        h.wait_for_function("document.getElementById('hInfo').textContent.includes('3 ')", timeout=30000)
+        h.wait_for_function("() => document.getElementById('hInfo').textContent.includes('3 ')", timeout=30000)
         check(True, "someone joining now finds the ronda on the other server")
         for _ in range(3):
             if ana.query_selector(".pa.c1"):
@@ -144,7 +144,7 @@ try:
         answer(ana, 1)
         answer(beto, 1)
         answer(caro, 0)
-        ana.wait_for_function(f"!document.getElementById('pScore').textContent.includes({s1!r})", timeout=20000)
+        ana.wait_for_function(f"() => !document.getElementById('pScore').textContent.includes({s1!r})", timeout=20000)
         check(score(ana) != s1 and "points" in score(beto) and pts(caro) == 0, f"question 2 played there: Ana {score(ana)}, Beto {score(beto)}, Caro none")
         s2a, s2b = score(ana), score(beto)
 
@@ -164,8 +164,8 @@ try:
 
         # now the other one dies: back to the first
         down(1)
-        h.wait_for_function(f"JSON.parse(sessionStorage.getItem('host:{code}')).at === 0", timeout=30000)
-        ana.wait_for_function("document.getElementById('pScore').textContent.includes('points')", timeout=30000)
+        h.wait_for_function(f"() => JSON.parse(sessionStorage.getItem('ronda.host:{code}')).at === 0", timeout=30000)
+        ana.wait_for_function("() => document.getElementById('pScore').textContent.includes('points')", timeout=30000)
         for _ in range(4):
             if ana.query_selector(".pa.c0") and "Tea" in (ana.text_content("#pMain") or ""):
                 break
@@ -177,7 +177,7 @@ try:
         answer(ana, 0)
         answer(beto, 1)
         answer(caro, 1)
-        h.wait_for_function("document.body.textContent.includes('Tea') && document.querySelectorAll('#hMain *').length > 3", timeout=15000)
+        h.wait_for_function("() => document.body.textContent.includes('Tea') && document.querySelectorAll('#hMain *').length > 3", timeout=15000)
 
         # starting a new ronda while the second server is down, then while the first is down
         h2, code2 = host_start()
@@ -187,7 +187,7 @@ try:
         h3, code3 = host_start()
         check(side(code3) == 1, f"a new ronda while the first server is down starts on the second ({code3})")
         dan = join(code3, "Dan")
-        h3.wait_for_function("document.body.textContent.includes('Dan')", timeout=30000)
+        h3.wait_for_function("() => document.body.textContent.includes('Dan')", timeout=30000)
         check(True, "and people can join it")
         check(not [e for e in errors if e.startswith("pageerror")], "no page errors")
         b.close()

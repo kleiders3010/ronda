@@ -38,7 +38,7 @@ const READ_MS = 1500;
 export const TEAM_RULES = { MAX_TEAMS, TALK_MS, READ_MS };
 export function cleanTeams(t) {
   if (!t || typeof t !== "object" || !Array.isArray(t.names)) return null;
-  const names = t.names.slice(0, MAX_TEAMS).map((n, i) => str(n, 20) || `Team ${i + 1}`);
+  const names = t.names.slice(0, MAX_TEAMS).map((n, i) => cleanName(n, 20) || `Team ${i + 1}`);
   if (names.length < 2) return null;
   const score = names.map((_, i) => Math.max(0, Math.min(1e7, Math.trunc(Number(t.score?.[i])) || 0)));
   return { names, talk: t.talk !== false, score };
@@ -102,7 +102,7 @@ export function cleanQa(x, players) {
     const up = [...new Set((Array.isArray(it.up) ? it.up : []).map(String))].filter((p) => players[p]);
     const carry = [...new Set((Array.isArray(it.v) ? it.v : []).map(String))].filter((v) => /^[a-z0-9]{12}$/.test(v)).slice(0, MAX_PLAYERS);
     const base = Math.max(0, Math.min(MAX_PLAYERS, Math.trunc(Number(it.n)) || 0) - up.length - carry.length);
-    qa.list.push({ id, by: players[it.by] ? String(it.by) : "", name: str(it.name, 30), text,
+    qa.list.push({ id, by: players[it.by] ? String(it.by) : "", name: cleanName(it.name, 30), text,
       at: Math.trunc(Number(it.at)) || Date.now(), up, st, ...(base ? { base } : {}), ...(carry.length ? { carry } : {}) });
   }
   return qa;
@@ -268,7 +268,7 @@ export function cleanSnap(s, host) {
   for (const p of (Array.isArray(s.players) ? s.players : []).slice(0, MAX_PLAYERS)) {
     const id = String(p?.id || "");
     if (!/^[A-Za-z0-9_-]{8,40}$/.test(id) || players[id]) continue;
-    players[id] = { name: str(p.name, 30) || "Player", score: Math.max(0, Math.min(1e7, Math.trunc(Number(p.score)) || 0)) };
+    players[id] = { name: cleanName(p.name, 30) || "Player", score: Math.max(0, Math.min(1e7, Math.trunc(Number(p.score)) || 0)) };
     const streak = Math.max(0, Math.min(1000, Math.trunc(Number(p.streak)) || 0));
     if (streak) players[id].streak = streak;
     if (p.out) players[id].out = true;
@@ -319,6 +319,13 @@ export function cleanSnap(s, host) {
 
 // ---- quiz validation: the host's device sends the quiz; keep only what the game uses, bounded ----
 const str = (v, n) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, n);
+// A name as others see it (audit R17): no control characters, no marks that flip the text's direction or hide in
+// it (so "Ana" can't be made to look like someone else), spaces folded. The joiner inside an emoji (a family, a
+// rainbow flag) stays. Same rule in Ronda, Juntos and Sumate.
+const INVISIBLE = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u115f\u1160\u180e\u200b\u200c\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\u3164\ufeff\uffa0\ufff9-\ufffb]/g;
+const LONE_JOINER = /(?<![\p{Extended_Pictographic}\p{Emoji_Modifier}\ufe0f])\u200d|\u200d(?!\p{Extended_Pictographic})/gu;
+export const cleanName = (v, n) => String(v ?? "").replace(/\s+/g, " ").replace(INVISIBLE, "").replace(LONE_JOINER, "").replace(/ {2,}/g, " ").trim().slice(0, n);
+
 
 export function cleanQuiz(q) {
   if (!q || typeof q !== "object" || !Array.isArray(q.questions)) return null;
@@ -539,7 +546,7 @@ export class Room {
         if (g.locked) return this.send(ws, { t: "locked" });
         // removed people still hold their name, but not a place
         if (Object.values(g.players).filter((x) => !x.out).length >= MAX_PLAYERS) return this.send(ws, { t: "full", max: MAX_PLAYERS });
-        const base = str(msg.name, 30) || "Player";
+        const base = cleanName(msg.name, 30) || "Player";
         const taken = new Set(Object.values(g.players).map((x) => x.name.toLowerCase()));
         let name = base;
         for (let k = 2; taken.has(name.toLowerCase()); k++) name = `${base} ${k}`;
@@ -608,7 +615,7 @@ export class Room {
       return this.hostsUpdate();
     }
     if (msg.t === "rename" && g.teams) {
-      const k = Number(msg.k), name = str(msg.name, 20);
+      const k = Number(msg.k), name = cleanName(msg.name, 20);
       if (!Number.isInteger(k) || k < 0 || k >= g.teams.names.length || !name) return;
       g.teams.names[k] = name;
       await this.save();

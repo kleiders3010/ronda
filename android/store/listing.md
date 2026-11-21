@@ -15,7 +15,7 @@ Make a quiz or a poll, show it on a big screen or share your screen in a video c
 
 No account, no ads and no player limit (up to 500 people in one room). Players don't need to install anything: they can join from any browser at quiz.jurisgames.com.
 
-What you make is saved only on your device. Share a whole quiz as a link, or download the results as a spreadsheet (CSV). The server deletes a game when the room is closed, or 6 hours after the last activity at most.
+What you make is saved only on your device. Share a whole quiz as a link, or download the results as a spreadsheet (CSV). The server deletes a live game when the room is closed, or 6 hours after the last activity at most; an assignment when its creator deletes it, or 30 days after its deadline at most.
 
 Open source: github.com/kleiders3010/ronda
 
@@ -34,6 +34,6 @@ Armá una trivia o una encuesta, mostrala en una pantalla grande o compartí la 
 
 Sin cuenta, sin anuncios y sin límite de jugadores (hasta 500 personas por sala). Los jugadores no necesitan instalar nada: pueden entrar desde cualquier navegador en quiz.jurisgames.com.
 
-Lo que creás se guarda solo en tu dispositivo. Compartí una ronda entera como enlace o descargá los resultados como planilla (CSV). El servidor borra la partida cuando se cierra la sala o, como máximo, 6 horas después de la última actividad.
+Lo que creás se guarda solo en tu dispositivo. Compartí una ronda entera como enlace o descargá los resultados como planilla (CSV). El servidor borra una partida en vivo cuando se cierra la sala o, como máximo, 6 horas después de la última actividad; una tarea cuando quien la creó la borra o, como máximo, 30 días después de su fecha límite.
 
 Código abierto: github.com/kleiders3010/ronda

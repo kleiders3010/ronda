@@ -106,13 +106,13 @@ with sync_playwright() as p:
     e.wait_for_selector("#editMsg:not([hidden])")
     check("between" in e.inner_text("#editMsg"), f"a right answer outside From-To can't start ({e.inner_text('#editMsg')!r})")
     e.wait_for_timeout(600)
-    kept = json.loads(e.evaluate("localStorage.getItem('rondas') || '[]'"))[0]["questions"][-1]
+    kept = json.loads(e.evaluate("localStorage.getItem('ronda.rondas') || '[]'"))[0]["questions"][-1]
     check(kept.get("min") == 1900 and kept.get("ans") == 2050 and kept.get("margin") == 0, "the slider's numbers are kept with the ronda")  # pinned: saved fields min/max/ans/margin
     e.context.close()
 
     h = page()
     h.goto(SITE + "/" + QS)
-    h.evaluate("q => localStorage.setItem('rondas', JSON.stringify([q]))", Q)
+    h.evaluate("q => localStorage.setItem('ronda.rondas', JSON.stringify([q]))", Q)
     h.reload()
     h.click(".mineRow .btn.primary")
     h.wait_for_url(lambda u: "/host/" in u, timeout=30000)
@@ -124,7 +124,7 @@ with sync_playwright() as p:
         pg.fill("#nameInput", n)
         pg.press("#nameInput", "Enter")
         pl[n] = pg
-    h.wait_for_function("document.body.textContent.includes('Beto')", timeout=30000)
+    h.wait_for_function("() => document.body.textContent.includes('Beto')", timeout=30000)
 
     def put(pg, v):
         pg.locator("input[name='slider']").evaluate("(x, v) => { x.value = v; x.dispatchEvent(new Event('input', {bubbles: true})); }", str(v))

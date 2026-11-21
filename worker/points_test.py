@@ -60,13 +60,13 @@ with sync_playwright() as p:
     e.click("[data-add='poll']")
     check(e.locator(".qcard").last.locator(".qpts").count() == 0, "a poll has no Points")
     e.wait_for_timeout(600)
-    kept = e.evaluate("localStorage.getItem('rondas') || ''")
+    kept = e.evaluate("localStorage.getItem('ronda.rondas') || ''")
     check('"pts":2' in kept, "double points is kept with the ronda")
     e.context.close()
 
     h = page()
     h.goto(SITE + "/" + QS)
-    h.evaluate("q => localStorage.setItem('rondas', JSON.stringify([q]))", Q)
+    h.evaluate("q => localStorage.setItem('ronda.rondas', JSON.stringify([q]))", Q)
     h.reload()
     h.click(".mineRow .btn.primary")
     h.wait_for_url(lambda u: "/host/" in u, timeout=30000)
@@ -78,7 +78,7 @@ with sync_playwright() as p:
         pg.fill("#nameInput", n)
         pg.press("#nameInput", "Enter")
         pl[n] = pg
-    h.wait_for_function("document.body.textContent.includes('Beto')", timeout=30000)
+    h.wait_for_function("() => document.body.textContent.includes('Beto')", timeout=30000)
 
     shot_q = [False]
 

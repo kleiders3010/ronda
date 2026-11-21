@@ -52,7 +52,7 @@ room (one Durable Object per 6-digit code) that runs the game and deletes everyt
 6 hours after the last activity. The same room code also runs on Node on our game host (`kinetic/`, `wss://games.jurisgames.com/ronda`, packed in by the ChessTactics game host): codes whose digits add up to an even number are made on Cloudflare, odd ones there. If a room's server stops answering, the host's screen moves the game to the other server from the copy it keeps (questions, names, points; a question in progress starts again), players follow, and the old server is told to drop its copy when it answers again. `python worker/failover_test.py` kills each server in turn mid-game. The site also has a copy on GitHub Pages, https://kleiders3010.github.io/ronda/ (`tools/mirror.mjs`, built by `.github/workflows/pages.yml` on every push), for when quiz.jurisgames.com is down; rondas are shared between both (`python worker/mirror_test.py`).
 
 ## Run locally
-    cd worker && npx wrangler dev --port 8788
+    cd worker && npm ci && npx wrangler dev --port 8788   (npm ci: the wrangler version the Worker is deployed with, worker/package.json)
     # open http://127.0.0.1:8788
 
 License: Apache-2.0. QR codes: qrcode-generator by Kazuhiko Arase (MIT, `web/vendor/qrcode.js`).

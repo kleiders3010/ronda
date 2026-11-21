@@ -54,8 +54,19 @@ function toast(text, ms = 3200) {
   setTimeout(() => d.remove(), ms);
 }
 
-function safeGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
-function safeSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
+// every key starts with "ronda." (audit R11: the GitHub Pages copy shares its storage with our other apps)
+function safeGet(k) { try { return localStorage.getItem("ronda." + k); } catch { return null; } }
+function safeSet(k, v) { try { localStorage.setItem("ronda." + k, v); return true; } catch { return false; } }
+// what an older version kept under the bare names moves over once ("name" is only copied: other apps may use it)
+try {
+  for (const k of ["rondas", "assigned", "pids", "name"]) {
+    const old = localStorage.getItem(k);
+    if (old == null || localStorage.getItem("ronda." + k) != null) continue;
+    localStorage.setItem("ronda." + k, old);
+    if (k !== "name") localStorage.removeItem(k);
+  }
+} catch {}
+const hostKey = (code) => "ronda.host:" + code;
 
 // "Send feedback" (home page and the big screen): what the person writes, plus, if they keep the tick, the page
 // they are on and how often the live link dropped. Never quiz content or names.
@@ -105,13 +116,19 @@ function route() {
 function allQuizzes() {
   try { return JSON.parse(safeGet("rondas") || "[]"); } catch { return []; }
 }
-function saveQuizzes(list) { safeSet("rondas", JSON.stringify(list)); }
+// a full storage must never look like "Saved" (audit R13): every save says when it didn't work
+let fullToast = 0;
+function saveQuizzes(list) {
+  if (safeSet("rondas", JSON.stringify(list))) return true;
+  if (Date.now() - fullToast > 6000) (fullToast = Date.now()), toast(t("Not saved: this browser's storage is full. Delete a ronda you don't need."), 8000);
+  return false;
+}
 function getQuiz(id) { return allQuizzes().find((q) => q.id === id); }
 function putQuiz(q) {
   const list = allQuizzes().filter((x) => x.id !== q.id);
   q.updated = Date.now();
   list.unshift(q);
-  saveQuizzes(list);
+  return saveQuizzes(list);
 }
 function newQuestion(kind) {
   const q = { kind, text: "", time: scored(kind) ? 20 : 0 };
@@ -152,26 +169,65 @@ const picsOf = (x) => [x.img, ...(x.aimg || [])].filter(isPic);
 // phones show a picture-only answer by its letter and colour alone (like Kahoot, whose phones show only the tiles)
 const aText = (a) => (a === PIC_ONLY ? "" : a);
 const withLetter = (answers, j) => (answers[j] === PIC_ONLY ? LETTERS[j] : LETTERS[j] + ": " + answers[j]);
-async function adopt(data) {
-  if (!data || !Array.isArray(data.questions)) throw new Error("not a ronda");
-  const q = { id: randId(10), title: String(data.title || "").slice(0, 120), questions: data.questions.slice(0, 100) };
+const KINDS = ["quiz", "poll", "words", "scale", "type", "order", "slider"]; // worker/src/index.js KINDS
+const TIMES = [0, 10, 20, 30, 60, 90, 120];
+const txt = (v, n) => (typeof v === "string" || typeof v === "number" ? String(v).slice(0, n) : "");
+function cleanImport(data) {
+  if (!data || typeof data !== "object" || !Array.isArray(data.questions)) return null;
+  const questions = [];
+  for (const x of data.questions.slice(0, 100)) {
+    if (!x || typeof x !== "object") continue;
+    const kind = KINDS.includes(x.kind) ? x.kind : "quiz";
+    const q = { kind, text: txt(x.text, 300), time: TIMES.includes(Number(x.time)) ? Number(x.time) : scored(kind) ? 20 : 0 };
+    if (kind === "quiz" || kind === "poll" || kind === "order") {
+      q.answers = (Array.isArray(x.answers) ? x.answers : []).slice(0, MAX_ANSWERS).map((a) => txt(a, 120));
+      while (q.answers.length < 2) q.answers.push("");
+    }
+    if (kind === "quiz") {
+      q.correct = [...new Set((Array.isArray(x.correct) ? x.correct : []).map(Number))].filter((i) => Number.isInteger(i) && i >= 0 && i < q.answers.length);
+      if (!q.correct.length) q.correct = [0];
+    }
+    if (kind === "type") q.accept = (Array.isArray(x.accept) ? x.accept : []).slice(0, 4).map((a) => txt(a, 60));
+    if (kind === "slider") {
+      const num = (v) => (v === "" || v == null || !Number.isFinite(Number(v)) || Math.abs(Number(v)) > 1e9 ? "" : Number(v));
+      Object.assign(q, { min: num(x.min), max: num(x.max), ans: num(x.ans) });
+      const m = Number(x.margin);
+      q.margin = Number.isInteger(m) && m >= 0 && m <= 4 ? m : 2;
+      if (txt(x.unit, 20)) q.unit = txt(x.unit, 20);
+    }
+    if (scored(kind) && (x.pts === 2 || x.pts === 0)) q.pts = x.pts;
+    q.img = x.img;
+    if (Array.isArray(x.aimg)) q.aimg = x.aimg;
+    questions.push(q);
+  }
+  if (!questions.length) return null;
+  return { title: txt(data.title, 120), questions };
+}
+
+async function adopt(raw) {
+  const data = cleanImport(raw);
+  if (!data) throw new Error("not a ronda");
+  const q = { id: randId(10), title: data.title, questions: data.questions };
   const take = async (v) => {
     if (typeof v !== "string" || !/^data:image\/(webp|jpeg|png|gif);base64,/.test(v) || v.length > 4e6) return null;
     try { return await putPic(v); } catch { return null; }
   };
+  let lost = 0;
   for (const x of q.questions) {
-    if (!x || typeof x !== "object") continue;
     const img = x.img, aimg = x.aimg;
     delete x.img;
     delete x.aimg;
     if ((x.img = await take(img)) == null) delete x.img;
+    if (img && !x.img) lost++;
     if (Array.isArray(aimg) && Array.isArray(x.answers) && (x.kind === "quiz" || x.kind === "poll")) {
       const keys = [];
       for (const v of aimg.slice(0, x.answers.length)) keys.push(await take(v));
+      lost += aimg.slice(0, x.answers.length).filter((v, i) => v && !keys[i]).length;
       if (keys.some(Boolean)) x.aimg = keys;
     }
   }
-  putQuiz(q);
+  if (!putQuiz(q)) throw new Error("full");
+  if (lost) toast(t("{n} pictures couldn't be kept", { n: lost }), 6000);
   return q;
 }
 // a file carries the pictures themselves
@@ -187,14 +243,43 @@ async function quizFile(q) {
   return JSON.stringify({ title: q.title, questions }, null, 1);
 }
 async function importLink(s) {
-  try {
-    const q = await adopt(await unpackQuiz(s));
-    toast(t("Saved to your rondas"));
-    go("/edit/" + q.id, true);
-  } catch {
+  let data = null;
+  try { data = cleanImport(await unpackQuiz(s)); } catch {}
+  if (!data) {
     toast(t("That link is broken"));
-    go("/", true);
+    return go("/", true);
   }
+  homeScreen();
+  const sheet = el("div", "asgSheet");
+  sheet.id = "addSheet";
+  sheet.setAttribute("role", "dialog");
+  sheet.setAttribute("aria-modal", "true");
+  const box = el("div", "asgBox card");
+  const no = el("button", "btn ghost", t("Cancel"));
+  const yes = el("button", "btn primary", t("Add to my rondas"));
+  yes.name = "add";
+  const row = el("div", "asgBtns");
+  row.append(no, yes);
+  box.append(el("h2", "asgHead", t("Add this ronda?")), el("p", "", data.title || t("Untitled")),
+    el("p", "small", t("{n} questions", { n: data.questions.length })), row);
+  sheet.append(box);
+  document.body.append(sheet);
+  const close = () => { sheet.remove(); history.replaceState(null, "", location.pathname + location.search); };
+  no.onclick = close;
+  sheet.onclick = (e) => { if (e.target === sheet) close(); };
+  yes.onclick = async () => {
+    yes.disabled = true;
+    try {
+      const q = await adopt(data);
+      sheet.remove();
+      toast(t("Saved to your rondas"));
+      go("/edit/" + q.id, true);
+    } catch (e) {
+      yes.disabled = false;
+      if (e.message !== "full") toast(t("That link is broken"));
+    }
+  };
+  setTimeout(() => yes.focus(), 50);
 }
 $("#importFile").addEventListener("change", async (e) => {
   const f = e.target.files[0];
@@ -203,8 +288,8 @@ $("#importFile").addEventListener("change", async (e) => {
   try {
     const q = await adopt(JSON.parse(await f.text()));
     go("/edit/" + q.id);
-  } catch {
-    toast(t("That file isn't a ronda"));
+  } catch (e) {
+    if (e.message !== "full") toast(t("That file isn't a ronda"));
   }
 });
 
@@ -261,7 +346,7 @@ let saveTimer = null;
 function touch() {
   $("#saved").textContent = t("Saving…");
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => { putQuiz(editing); $("#saved").textContent = t("Saved"); }, 400);
+  saveTimer = setTimeout(() => { $("#saved").textContent = putQuiz(editing) ? t("Saved") : t("Not saved"); }, 400);
 }
 
 function editScreen(id) {
@@ -656,7 +741,7 @@ async function startHosting(q) {
     const a = src.aimg && x.answers ? x.answers.map((v, j) => [v, src.aimg[j] || null]).filter(([v]) => v.trim()).map(([, k]) => k) : null;
     return src.img || a ? { q: src.img || null, a } : null;
   });
-  sessionStorage.setItem("host:" + code, JSON.stringify({ token, at, quiz: { title: q.title, questions }, pics }));
+  sessionStorage.setItem(hostKey(code), JSON.stringify({ token, at, quiz: { title: q.title, questions }, pics }));
   go("/host/" + code);
 }
 
@@ -1213,7 +1298,7 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
 
 function hostScreen(code) {
   let saved = null;
-  try { saved = JSON.parse(sessionStorage.getItem("host:" + code)); } catch {}
+  try { saved = JSON.parse((sessionStorage.getItem(hostKey(code)) ?? sessionStorage.getItem("host:" + code))); } catch {}
   if (!saved) { toast(t("This screen isn't hosting that ronda")); return go("/", true); }
   show("host");
   keepAwake();
@@ -1232,7 +1317,7 @@ function hostScreen(code) {
     if (keepTimer) return;
     keepTimer = setTimeout(() => {
       keepTimer = 0;
-      try { sessionStorage.setItem("host:" + code, JSON.stringify({ ...saved, snap })); } catch {}
+      try { sessionStorage.setItem(hostKey(code), JSON.stringify({ ...saved, snap })); } catch {}
     }, 1500);
   };
   const resume = (at) => {
@@ -1255,10 +1340,10 @@ function hostScreen(code) {
     if (m.t === "moved") return;
     // the other server would not take the game (no proof it is ours): never lose it, wait for its own server
     if (m.t === "denied" && at !== homeOf(code)) { saved.at = homeOf(code); keep(); return live.move(homeOf(code)); }
-    if (m.t === "denied" || m.t === "gone") { toast(t("This ronda has ended")); sessionStorage.removeItem("host:" + code); return go("/", true); }
+    if (m.t === "denied" || m.t === "gone") { toast(t("This ronda has ended")); sessionStorage.removeItem(hostKey(code)); return go("/", true); }
     if (m.t === "bad-quiz") { toast(t("Something in this ronda can't be used")); return go("/", true); }
-    if (m.t === "export") return saveResults(m);
-    if (m.t === "closed") { sessionStorage.removeItem("host:" + code); return go("/", true); }
+    if (m.t === "export") return Date.now() - askedExport < 30000 && ((askedExport = 0), saveResults(m));
+    if (m.t === "closed") { sessionStorage.removeItem(hostKey(code)); return go("/", true); }
     if (m.t === "qa") {
       snap.qa = { open: m.open, mod: m.mod, list: m.list };
       keep();
@@ -1278,9 +1363,10 @@ function hostScreen(code) {
     lastKey = key;
   }, { at: first, patience: 3 });
   live.host = true;
+  let askedExport = 0;
   $("#hNext").onclick = () => {
     if (!st) return;
-    if (st.phase === "end") return live.send({ t: "export" });
+    if (st.phase === "end") return (askedExport = Date.now()), live.send({ t: "export" });
     if (st.phase === "lobby" && !st.players.length) return toast(t("Wait for people to join first"));
     live.send({ t: "next" });
   };
@@ -1744,8 +1830,9 @@ function hash(s) { let h = 0; for (const ch of s) h = (h * 31 + ch.charCodeAt(0)
 
 function csvCell(v) {
   let s = String(v);
-  if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) s = "'" + s; // a name like "=HYPERLINK(...)" stays text
-  return /[",\n;]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  // anything but a number that starts like a formula stays text ("=HYPERLINK(...)" as a name, or a one-item list)
+  if (typeof v !== "number" && /^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return /[",\r\n;]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 
 function saveResults(m) {

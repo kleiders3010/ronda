@@ -53,7 +53,7 @@ with sync_playwright() as p:
 
     h = page(1280, 720)
     h.goto(SITE + "/")
-    h.evaluate("q => localStorage.setItem('rondas', JSON.stringify([q]))", Q)
+    h.evaluate("q => localStorage.setItem('ronda.rondas', JSON.stringify([q]))", Q)
     h.reload()
     h.click(".mineRow .btn.primary")
     h.wait_for_url(lambda u: "/host/" in u, timeout=30000)
@@ -65,15 +65,15 @@ with sync_playwright() as p:
         pl.fill("#nameInput", f"P{i}")
         pl.press("#nameInput", "Enter")
         players.append((pl, w, ht))
-    h.wait_for_function("document.body.textContent.includes('P1')", timeout=30000)
+    h.wait_for_function("() => document.body.textContent.includes('P1')", timeout=30000)
     for n in (6, 4):
         h.click("#hNext")  # the question
-        h.wait_for_function(f"document.querySelectorAll('.ha').length === {n}", timeout=30000)
+        h.wait_for_function(f"() => document.querySelectorAll('.ha').length === {n}", timeout=30000)
         h.wait_for_timeout(800)
         seen = h.evaluate(IN_VIEW, ".ha, #hNext")
         check(len(seen) == n + 1 and all(seen), f"1280x720 host: {n} answers and Next on screen without scrolling ({seen})")
         for pl, w, ht in players:
-            pl.wait_for_function(f"document.querySelectorAll('.pa').length === {n}", timeout=30000)
+            pl.wait_for_function(f"() => document.querySelectorAll('.pa').length === {n}", timeout=30000)
             pl.wait_for_timeout(500)
             r = pl.evaluate(REACH, ".pa")
             check(len(r) == n and all(r), f"{w}x{ht} player: all {n} answers can be reached and tapped ({r})")

@@ -205,6 +205,12 @@ const DICT = {
     "This ronda has already finished.": "Esta ronda ya terminó.",
     "This ronda has ended": "Esta ronda terminó",
     "This ronda has ended. Thanks for playing!": "Esta ronda terminó. ¡Gracias por jugar!",
+    "Not saved: this browser's storage is full. Delete a ronda you don't need.": "No se guardó: el almacenamiento del navegador está lleno. Borrá una ronda que no necesites.",
+    "Not saved": "Sin guardar",
+    "{n} pictures couldn't be kept": "No se pudieron guardar {n} imágenes",
+    "Add this ronda?": "¿Agregar esta ronda?",
+    "A first name or a nickname is enough": "Alcanza con un nombre o un apodo",
+    "Add to my rondas": "Agregar a mis rondas",
     "Too many tries from this network. Wait a minute and try again.": "Demasiados intentos desde esta red. Esperá un minuto y probá de nuevo.",
     "No ronda is running with this code. For an assignment, open the link you were sent.": "No hay ninguna ronda con este código. Si es una tarea, abrí el enlace que te mandaron.",
     "Show the top 5 names and points to people when they finish": "Mostrar los 5 primeros (nombres y puntos) al terminar",
@@ -297,17 +303,17 @@ const DICT = {
   },
 };
 
+// only a language this app has (never "constructor" or "__proto__" from a link), and only that is remembered
+const baseOf = (l) => String(l || "").toLowerCase().split("-")[0];
+const known = (b) => b === "en" || Object.hasOwn(DICT, b);
+
 function pick() {
   const asked = new URLSearchParams(location.search).get("lang");
-  if (asked) {
-    try { localStorage.setItem("lang", asked); } catch {}
+  if (asked && known(baseOf(asked))) {
+    try { localStorage.setItem("ronda.lang", baseOf(asked)); } catch {}
   }
-  const want = [asked, safeGet("lang"), ...(navigator.languages || [navigator.language])].filter(Boolean);
-  for (const l of want) {
-    const base = String(l).toLowerCase().split("-")[0];
-    if (base === "en") return "en";
-    if (DICT[base]) return base;
-  }
+  const want = [asked, safeGet("ronda.lang") || safeGet("lang"), ...(navigator.languages || [navigator.language])].filter(Boolean);
+  for (const l of want) if (known(baseOf(l))) return baseOf(l);
   return "en";
 }
 
@@ -316,7 +322,7 @@ function safeGet(k) {
 }
 
 export const LANG = pick();
-const table = DICT[LANG] || {};
+const table = LANG !== "en" && Object.hasOwn(DICT, LANG) ? DICT[LANG] : {};
 
 /** t("{name} left", { name }) -> the text in the UI language, placeholders filled. */
 export function t(text, vars) {
