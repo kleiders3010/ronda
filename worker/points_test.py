@@ -5,7 +5,7 @@
 # The big screen and the phones say "Double points" / "No points" while the question is up; Ana gets more than 1000
 # on the double one, nothing on the no-points one (no "+0"), and her phone shows a streak of 2 after question 3 (the
 # no-points question neither adds nor breaks it); Beto's streak is 1, so nothing shows.
-#   python worker/points_test.py [site] [query, to pick the server]   (local: cd worker && npx wrangler dev --port 8788)
+#   python worker/points_test.py [site] [query, to pick the server]   (local: cd worker && npx wrangler dev -c wrangler.test.toml --port 8788)
 import os
 import re
 import sys

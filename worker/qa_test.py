@@ -1,7 +1,7 @@
 # Audience questions (like Slido's Q&A): people ask the host from their phones, by name or anonymously, and upvote;
 # the host sees them by votes, shows one on the big screen, marks it answered, can approve each one first, can close
 # questions, and saves them to a file. A host and two players (one on a small phone).
-#   python worker/qa_test.py [site] [query, to pick the server]   (local: cd worker && npx wrangler dev --port 8788)
+#   python worker/qa_test.py [site] [query, to pick the server]   (local: cd worker && npx wrangler dev -c wrangler.test.toml --port 8788)
 import csv
 import io
 import sys

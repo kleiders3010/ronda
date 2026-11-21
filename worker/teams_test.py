@@ -3,7 +3,7 @@
 # host renames teams and moves people; team talk gives 5 s to decide together before answers open; a team's points are
 # the average of its members' (Kahoot: "These are an average of team player scores"); the scoreboard and the podium
 # show teams. A host and four phones, two teams, two questions.
-#   python worker/teams_test.py [site] [query, to pick the server]   (local: cd worker && npx wrangler dev --port 8788)
+#   python worker/teams_test.py [site] [query, to pick the server]   (local: cd worker && npx wrangler dev -c wrangler.test.toml --port 8788)
 import csv
 import io
 import json

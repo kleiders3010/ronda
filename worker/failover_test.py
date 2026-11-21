@@ -3,7 +3,7 @@
 # one dies later; a ronda can be started while one server is down; someone joining late finds it wherever it is.
 # Both room servers here are kinetic/server.mjs (one standing in for Cloudflare: SIDE=even), so the test can kill
 # and restart them; the page comes from the Worker (wrangler dev).
-#   cd worker && npx wrangler dev --port 8788   then   python worker/failover_test.py
+#   cd worker && npx wrangler dev -c wrangler.test.toml --port 8788   then   python worker/failover_test.py
 import os
 import re
 import subprocess

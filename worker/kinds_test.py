@@ -3,7 +3,7 @@
 # the screen shows the answer, how many got it and what people typed. Put in order: both see the same mix (never
 # already in order), Ana taps them back in order and scores, Beto doesn't. The ranking, the podium and the results
 # file (with ✓/✗) count both kinds. Also: the editor offers both kinds and won't start a type question with no answer.
-#   python worker/kinds_test.py [site] [query, to pick the server]   (local: cd worker && npx wrangler dev --port 8788)
+#   python worker/kinds_test.py [site] [query, to pick the server]   (local: cd worker && npx wrangler dev -c wrangler.test.toml --port 8788)
 import csv
 import io
 import sys

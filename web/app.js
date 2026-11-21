@@ -768,14 +768,18 @@ async function makeRoom() {
 // break down"): this site's own (Cloudflare) and the game host's (games.jurisgames.com/ronda). A code's digits say
 // which one made it (an even sum: the first). When one stops answering, the host's screen moves the game to the
 // other and everyone follows.
-// Test switches (?server= etc.) take only our own hosts, this computer, or addresses that can never connect (.invalid,
-// for failover tests): a crafted link can never point the app at somebody else's server (APP-RULES safety 1).
+// Test switches (?server= etc.) take only our own hosts, or addresses that can never connect (.invalid, for failover
+// tests): a crafted link can never point the app at somebody else's server (APP-RULES safety 1). This computer
+// (localhost) only when the page itself is served from this computer, so a link to the real site can never make it
+// talk to something running on the visitor's own machine (safety round 2, J15). The shipped page's CSP has no
+// localhost either; the test server adds it (worker/wrangler.test.toml).
+const LOCAL = /^(localhost|127\.0\.0\.1|\[::1\])$/;
 const testHost = (u) => {
   try {
     const x = new URL(u);
     if (!/^(wss?|https?):$/.test(x.protocol)) return null;
     const h = x.hostname;
-    return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(h) || /(^|\.)jurisgames\.com$/.test(h) || /\.invalid$/.test(h) ? u : null;
+    return (LOCAL.test(h) && LOCAL.test(location.hostname)) || /(^|\.)jurisgames\.com$/.test(h) || /\.invalid$/.test(h) ? u : null;
   } catch { return null; }
 };
 const RP = new URLSearchParams(location.search);

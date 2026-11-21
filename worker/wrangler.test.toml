@@ -1,0 +1,32 @@
+# TESTS ONLY, never deployed: npx wrangler dev -c wrangler.test.toml --port 8788
+# Same as wrangler.toml, but every request passes the Worker, which adds this computer to the pages' CSP
+# (the shipped pages have no localhost in it: safety round 2, J15).
+# Ronda: the web app (static files) and its live rooms (one Durable Object per room code), one Worker.
+# Free plan: SQLite-backed Durable Objects, static assets.
+name = "ronda-test"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+workers_dev = false
+
+[assets]
+directory = "../web"
+not_found_handling = "single-page-application"
+run_worker_first = true
+binding = "ASSETS"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
+
+# new joins and failed lookups: 100 per address per minute in each Cloudflare location (index.js lookupOk)
+[[ratelimits]]
+name = "JOINS"
+namespace_id = "2101"
+simple = { limit = 100, period = 60 }
+
+[vars]
+TEST_LOCAL_CSP = "1"

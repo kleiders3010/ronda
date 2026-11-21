@@ -5,7 +5,7 @@
 #   1 a year, medium margin: Ana exact, Beto 31 off (out of the margin)
 #   2 pi to 2 decimals, no margin, double points: Ana exact, Beto 0.01 off
 #   3 a price with a unit, maximum margin: both get points, the closer more
-#   python worker/slider_test.py [site] [query, to pick the server]   (local: cd worker && npx wrangler dev --port 8788)
+#   python worker/slider_test.py [site] [query, to pick the server]   (local: cd worker && npx wrangler dev -c wrangler.test.toml --port 8788)
 import csv
 import io
 import json

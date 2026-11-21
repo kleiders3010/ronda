@@ -162,6 +162,7 @@ export default {
       return env.ROOMS.get(env.ROOMS.idFromName(m[1])).fetch(new Request(req, { headers: h }));
     }
     if (url.pathname === "/health") return new Response("ok");
+    if (env.TEST_LOCAL_CSP === "1" && env.ASSETS) return testPage(req, env);
     return new Response("not found", { status: 404 });
   },
 };
@@ -1177,4 +1178,16 @@ export class Room {
     this.quizSent?.delete(ws);
     if ((ws.deserializeAttachment() || {}).role === "player" && (await this.game())) this.hostsUpdate();
   }
+}
+
+const LOCAL_CSP = " http://127.0.0.1:* ws://127.0.0.1:* http://localhost:* ws://localhost:*";
+// tests only (wrangler.test.toml: every request passes the Worker): the pages as shipped, plus this computer in their
+// CSP so test servers on other local ports can be reached (safety round 2, J15). Never set when deployed.
+async function testPage(req, env) {
+  const r = await env.ASSETS.fetch(req);
+  if (!(r.headers.get("content-type") || "").includes("text/html")) return r;
+  const html = (await r.text()).replace(/(connect-src [^;"]*)/, (m) => m + LOCAL_CSP);
+  const h = new Headers(r.headers);
+  h.delete("content-length");
+  return new Response(html, { status: r.status, headers: h });
 }

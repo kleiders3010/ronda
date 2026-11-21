@@ -3,7 +3,7 @@
 # on each phone. Someone who leaves mid-way comes back where they were (same browser); time runs on the server. The
 # host's report shows who started and finished, points, right answers and each question; the deadline can be moved
 # or ended now; after it nobody new joins and whoever didn't finish is told. Results download as a spreadsheet.
-#   python worker/assign_test.py [site] [query, to pick the server]   (local: cd worker && npx wrangler dev --port 8788)
+#   python worker/assign_test.py [site] [query, to pick the server]   (local: cd worker && npx wrangler dev -c wrangler.test.toml --port 8788)
 import csv
 import io
 import json

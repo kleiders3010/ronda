@@ -1,6 +1,6 @@
 # Audit R13: a ronda that comes in a link or a file is cleaned to the shapes the server takes; a link asks before it
 # adds anything; a save that didn't work never says "Saved".
-#   python worker/import_test.py [site]   (local: cd worker && npx wrangler dev --port 8788)
+#   python worker/import_test.py [site]   (local: cd worker && npx wrangler dev -c wrangler.test.toml --port 8788)
 import base64, json, sys
 from playwright.sync_api import sync_playwright
 
