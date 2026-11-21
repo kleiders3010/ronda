@@ -151,9 +151,17 @@ export const sideOf = (code) => [...String(code)].reduce((a, d) => a + Number(d)
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
-    if (url.pathname === "/api/new" && req.method === "POST") return newRoom(env);
     if (url.pathname === "/api/new" && req.method === "OPTIONS") return new Response(null, { headers: CORS });
     const m = url.pathname.match(/^\/ws\/(\d{6})$/);
+    // every socket and new code per address, before any room is woken (safety round 3 sweep, APP-RULES safety 39):
+    // wrangler.toml WAKES, far above a real class on one network (rejoins included); JOINS inside the room still
+    // counts new joins and failed lookups only
+    if ((m || (url.pathname === "/api/new" && req.method === "POST")) && env.WAKES) {
+      let ok = true;
+      try { ok = (await env.WAKES.limit({ key: await ipKey(req.headers.get("CF-Connecting-IP")) })).success; } catch (_) {}
+      if (!ok) return Response.json({ error: "slow" }, { status: 429, headers: CORS });
+    }
+    if (url.pathname === "/api/new" && req.method === "POST") return newRoom(env);
     if (m) {
       if (req.headers.get("Upgrade") !== "websocket") return new Response("expected a websocket", { status: 426 });
       const h = new Headers(req.headers);
@@ -227,7 +235,8 @@ export async function hostToken(env, code) {
   return s ? rand + s : randomToken(24);
 }
 export function same(a, b) {
-  if (a.length !== b.length) return false;
+  a = typeof a === "string" ? a : ""; b = typeof b === "string" ? b : ""; // a missing token is simply wrong (round 3 sweep)
+  if (!a || a.length !== b.length) return false;
   let d = 0;
   for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return d === 0;
@@ -497,7 +506,7 @@ export class Room {
     ws.__ip = this.state.getTags(ws)[1] || "ip:none";
     // the host's screen brings the game over from the other server (or back after this one lost it)
     if (msg.t === "resume") {
-      if (g && msg.token !== g.host) return this.send(ws, { t: "denied" });
+      if (g && !same(msg.token, g.host)) return this.send(ws, { t: "denied" });
       if (!g && !(await proven(this.env, this.state.getTags(ws)[0], msg.token))) return this.send(ws, { t: "denied" });
       const snap = cleanSnap(msg.snap, String(msg.token || ""));
       if (!snap || !/^[a-z0-9]{24}$/.test(snap.host)) return this.send(ws, { t: "bad-quiz" });
@@ -518,7 +527,7 @@ export class Room {
     }
     // the game went on on the other server: whoever is still here follows it
     if (msg.t === "moved") {
-      if (msg.token !== g.host) return this.nope(ws);
+      if (!same(msg.token, g.host)) return this.nope(ws);
       for (const s of this.state.getWebSockets()) this.send(s, { t: "moved" });
       this.g = null;
       await this.state.storage.deleteAll();
@@ -526,7 +535,7 @@ export class Room {
     }
 
     if (msg.t === "host") {
-      if (msg.token !== g.host) return this.nope(ws);
+      if (!same(msg.token, g.host)) return this.nope(ws);
       ws.serializeAttachment({ role: "host" });
       return this.toHost(ws);
     }

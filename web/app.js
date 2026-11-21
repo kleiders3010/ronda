@@ -6,6 +6,12 @@ import { putPic, getPic, keepOnly, shrink, isPic } from "./pics.js";
 // the folder the app lives in: "/" on quiz.jurisgames.com, "/ronda/" on the copy at GitHub Pages
 const BASE = new URL(".", import.meta.url).pathname;
 const here = () => "/" + location.pathname.slice(BASE.length); // the app's own path ("/host/123456")
+// nobody puts the app inside their own page: the GitHub Pages copy can't send frame-ancestors (safety round 3 sweep of
+// Juntos' J18 b; APP-RULES safety 44)
+if (window.top !== window.self) {
+  document.documentElement.textContent = "";
+  throw new Error("ronda: not in a frame");
+}
 
 const $ = (s) => document.querySelector(s);
 const el = (tag, cls, text) => {

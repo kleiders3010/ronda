@@ -64,7 +64,28 @@ with sync_playwright() as p:
           f"J15 a page not on this computer ignores switches pointing at it (tried: {sorted(set(away))[:4]})")  # pinned: safety round 2 J15
     home = tried_from(BASE)
     check(any(LOCAL.search(u) for u in home), f"J15 a page on this computer still takes them (tests rely on it; tried: {sorted(set(home))[:4]})")  # pinned: safety round 2 J15
+
+    # round 3 sweep (APP-RULES safety 44): inside another page's frame the app shows nothing (the GitHub Pages copy
+    # can't send frame-ancestors, so the page refuses by itself)
+    ctx = b.new_context(locale="en-US")
+    ctx.route("http://framer.test/", lambda r: r.fulfill(content_type="text/html", body=f'<iframe id="f" src="{BASE}/"></iframe>'))
+    def like_pages(r):  # the page as GitHub Pages serves it: without the header-only frame refusal
+        resp = r.fetch()
+        r.fulfill(status=resp.status, body=resp.body(),
+                  headers={k: v for k, v in resp.headers.items() if k.lower() not in ("content-security-policy", "x-frame-options", "content-length")})
+    ctx.route(BASE + "/", like_pages)
+    pg = ctx.new_page()
+    pg.goto("http://framer.test/")
+    pg.wait_for_timeout(3000)
+    fr = next((f for f in pg.frames if f.url.startswith(BASE)), None)
+    body = fr.evaluate("() => document.documentElement.textContent.trim()") if fr else ""
+    check(fr is not None and body == "", f"round 3: framed, the page empties itself ({body[:40]!r})")  # pinned: APP-RULES safety 44
+    ctx.close()
     b.close()
+
+for f in ("wrangler.toml", "wrangler.test.toml"):
+    t = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), f), encoding="utf-8").read()
+    check('name = "WAKES"' in t, f"round 3: {f} limits sockets and new codes per address before a room wakes")  # pinned: APP-RULES safety 39
 
 print("\n" + ("ALL OK" if not errors else f"{len(errors)} FAILED:\n" + "\n".join(errors)))
 sys.exit(1 if errors else 0)

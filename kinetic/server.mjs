@@ -84,7 +84,7 @@ class Storage {
       writeFileSync(this.file + ".tmp", JSON.stringify(all));
       renameSync(this.file + ".tmp", this.file);
       disk.set(this.file, summary(all));
-    } catch (_) {}
+    } catch (e) { console.error("ronda: writing a room failed:", e && e.message); } // said, never silent (APP-RULES safety 45)
   }
   async get(k) {
     if (Array.isArray(k)) return new Map(k.filter((x) => this.map.has(x)).map((x) => [x, clone(this.map.get(x))]));

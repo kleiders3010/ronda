@@ -30,3 +30,10 @@ simple = { limit = 100, period = 60 }
 
 [vars]
 TEST_LOCAL_CSP = "1"
+
+# every socket and new code per address, checked in the Worker before a room is woken (safety round 3 sweep):
+# far above a real class on one network, reconnects included
+[[ratelimits]]
+name = "WAKES"
+namespace_id = "2106"
+simple = { limit = 600, period = 60 }
