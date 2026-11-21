@@ -19,7 +19,7 @@ if (!globalThis.crypto) globalThis.crypto = webcrypto;
 if (typeof Response.json !== "function")
   Response.json = (d, init = {}) => new Response(JSON.stringify(d), { ...init, headers: { ...(init.headers || {}), "content-type": "application/json" } });
 
-const { Room, newRoom, ipKey } = await import(process.env.RONDA_ROOM || "./room.mjs");
+const { Room, newRoom, ipKey, idleClose } = await import(process.env.RONDA_ROOM || "./room.mjs");
 
 const PORT = Number(process.env.PORT) || 8789;
 const BIND = process.env.BIND || "0.0.0.0";
@@ -204,18 +204,21 @@ const server = http.createServer(async (req, res) => {
   res.end(m ? "expected a websocket" : "not found");
 });
 
+const MAX_PER_ROOM = 550; // the same as the Worker's MAX_SOCKETS
 const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MSG });
 server.on("upgrade", (req, socket, head) => {
   const m = (req.url || "").split("?")[0].match(/^\/ws\/(\d{6})$/);
   if (!m || sockets >= MAX_SOCKETS) return socket.destroy();
   wss.handleUpgrade(req, socket, head, (ws) => {
     const r = roomOf(m[1]);
+    if (r.state.sockets.size >= MAX_PER_ROOM) return ws.close(1013, "full");
     sockets++;
     let att = null;
     ws.serializeAttachment = (v) => (att = clone(v));
     ws.deserializeAttachment = () => clone(att);
     const ip = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "?").split(",")[0].trim();
     r.state.acceptWebSocket(ws, [m[1], "ip:none"]);
+    idleClose(ws);
     ipKey(ip).then((k) => (ws.tags[1] = k));
     ws.on("message", (data, binary) => {
       if (binary) return;

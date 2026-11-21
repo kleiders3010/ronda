@@ -828,6 +828,7 @@ function playScreen(code, name) {
     if (m.t === "gone" || m.t === "closed") return endMsg(t("This ronda has ended. Thanks for playing!"));
     if (m.t === "over") return endMsg(t("This ronda has already finished."));
     if (m.t === "full") return endMsg(t("This ronda is full ({max} people)", { max: m.max }));
+    if (m.t === "locked") return endMsg(t("The host has locked this ronda"));
     if (m.t === "removed") return endMsg(t("The host removed you from this ronda."));
     if (m.t === "qa") return playerQa(m);
     if (m.t === "qa-full") return toast(t("No more questions can be asked here"));
@@ -1259,6 +1260,7 @@ function hostScreen(code) {
       return hostQa(m);
     }
     if (m.t !== "host") return;
+    if (m.sameQuiz) m.quiz = snap.quiz; // the server sends the quiz once
     if (!m.quiz) return live.send({ t: "load", quiz: saved.quiz });
     Object.assign(snap, { quiz: m.quiz, phase: m.phase, qi: m.qi, boardShown: m.boardShown, shuf: m.shuf || undefined });
     snap.players = [...m.players, ...(m.out || []).map((id) => ({ id, out: true }))];
@@ -1399,8 +1401,13 @@ function renderHost(code, m, fresh) {
       if (window.qrcode) qrBox.append(qr(location.origin + BASE + code), el("p", "small", t("or scan this with the phone camera")));
       wrap.append(left, qrBox);
       const people = el("div", "people");
-      main.replaceChildren(wrap, el("p", "count"), people);
+      const lock = el("button", "btn ghost lockBtn");
+      lock.onclick = () => live.send({ t: "lock", on: lock.dataset.on !== "1" });
+      main.replaceChildren(wrap, el("p", "count"), lock, people);
     }
+    const lockB = main.querySelector(".lockBtn");
+    lockB.dataset.on = m.locked ? "1" : "";
+    lockB.textContent = m.locked ? t("Unlock: let new people join") : t("Lock: nobody new can join");
     main.querySelector(".count").textContent = !active ? t("Waiting for people…")
       : m.teams ? t("{n} people are in. Tap a name to move it to another team or remove it.", { n: active })
       : t("{n} people are in. Tap a name to remove it.", { n: active });

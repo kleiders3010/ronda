@@ -9,6 +9,11 @@
 // ("resume", from the copy it keeps) and players follow.
 
 const MAX_PLAYERS = 500;
+// limits (APP-RULES safety 5), far above what a real game does: a phone sends a message when someone presses
+const BUDGET_MS = 10000;
+const BUDGET = { player: 40, host: 300, none: 10 }; // messages per socket per 10 s, then it is closed
+const MAX_SOCKETS = MAX_PLAYERS + 50; // per room
+const JOIN_MS = 10000; // a socket that has not joined or hosted by then is closed
 const MAX_MSG = 256 * 1024; // a whole quiz arrives in one message
 const ROOM_TTL = 6 * 3600 * 1000;
 const KINDS = ["quiz", "poll", "words", "scale", "type", "order", "slider"];
@@ -171,6 +176,24 @@ async function sig(env, code, rand) {
   const s = new Uint8Array(await crypto.subtle.sign("HMAC", key, enc("ronda|" + code + "|" + rand)));
   return [...s.slice(0, 12)].map((b) => ALPH[b % 32]).join("");
 }
+// a socket that never says who it is does not stay open
+export function idleClose(ws) {
+  setTimeout(() => {
+    if (!(ws.deserializeAttachment() || {}).role) try { ws.close(1008, "no join"); } catch (_) {}
+  }, JOIN_MS);
+}
+// each socket's message budget; over it, the socket is closed
+export function overBudget(room, ws) {
+  const b = (room.budget ||= new Map());
+  const now = Date.now();
+  let x = b.get(ws);
+  if (!x || now - x.t > BUDGET_MS) b.set(ws, (x = { t: now, n: 0 }));
+  const role = (ws.deserializeAttachment() || {}).role || "none";
+  if (++x.n <= (BUDGET[role] || BUDGET.none)) return false;
+  try { ws.close(1008, "too many messages"); } catch (_) {}
+  return true;
+}
+
 export async function handleOf(code, raw) {
   const h = new Uint8Array(await crypto.subtle.digest("SHA-256", enc("ronda-player|" + code + "|" + raw)));
   return [...h.slice(0, 16)].map((b) => ALPH[b % 32]).join("");
@@ -402,8 +425,10 @@ export class Room {
       await this.plan();
       return new Response("ok");
     }
+    if (this.state.getWebSockets().length >= MAX_SOCKETS) return new Response("full", { status: 429 });
     const pair = new WebSocketPair();
     this.state.acceptWebSocket(pair[1], [req.headers.get("x-room") || "", req.headers.get("x-ip-key") || "ip:none"]);
+    idleClose(pair[1]);
     return new Response(null, { status: 101, webSocket: pair[0] });
   }
 
@@ -419,6 +444,7 @@ export class Room {
 
   async webSocketMessage(ws, raw) {
     if (typeof raw !== "string" || raw.length > MAX_MSG) return;
+    if (overBudget(this, ws)) return;
     let msg;
     try {
       msg = JSON.parse(raw);
@@ -462,10 +488,14 @@ export class Room {
       // players are kept under a one-way hash of their secret id and this room's code: hosts, reports and exports
       // see only that, which can't be turned back into the id that joins as them
       const id = await handleOf(this.state.getTags(ws)[0], raw);
+      // one socket is one person for its whole life (APP-RULES safety 4)
+      if (me.role && !(me.role === "player" && me.id === id)) return;
       let p = g.players[id];
       if (!p) {
         if (g.phase === "end" || (g.self && Date.now() >= g.self.until)) return this.send(ws, { t: "over" });
-        if (Object.keys(g.players).length >= MAX_PLAYERS) return this.send(ws, { t: "full", max: MAX_PLAYERS });
+        if (g.locked) return this.send(ws, { t: "locked" });
+        // removed people still hold their name, but not a place
+        if (Object.values(g.players).filter((x) => !x.out).length >= MAX_PLAYERS) return this.send(ws, { t: "full", max: MAX_PLAYERS });
         const base = str(msg.name, 30) || "Player";
         const taken = new Set(Object.values(g.players).map((x) => x.name.toLowerCase()));
         let name = base;
@@ -522,6 +552,12 @@ export class Room {
       return this.hostsUpdate();
     }
     if (msg.t === "teams" && g.phase === "lobby") return this.setTeams(msg);
+    // Kahoot's "Lock": nobody new can join (people already in can come back)
+    if (msg.t === "lock") {
+      g.locked = !!msg.on;
+      await this.save();
+      return this.hostsUpdate();
+    }
     if (msg.t === "rename" && g.teams) {
       const k = Number(msg.k), name = str(msg.name, 20);
       if (!Number.isInteger(k) || k < 0 || k >= g.teams.names.length || !name) return;
@@ -976,6 +1012,7 @@ export class Room {
       t: "host",
       phase: g.phase,
       quiz: g.quiz,
+      locked: !!g.locked,
       qi: g.qi,
       players: this.ranking(),
       teams: g.teams ? { names: g.teams.names, talk: g.teams.talk, score: g.teams.score } : null,
@@ -994,13 +1031,27 @@ export class Room {
 
   toHost(ws) {
     if (this.g.self) return this.send(ws, this.report());
-    this.send(ws, this.hostView());
+    const v = this.hostView();
+    (this.quizSent ||= new Map()).set(ws, v.quiz);
+    this.send(ws, v);
     this.send(ws, this.hostQa());
   }
 
+  // the quiz goes to each host screen once (it can be 256 KB); later updates say "same quiz"
   hostsUpdate() {
-    const v = this.g.self ? this.report() : this.hostView();
-    for (const ws of this.sockets("host")) this.send(ws, v);
+    if (this.g.self) {
+      const v = this.report();
+      for (const ws of this.sockets("host")) this.send(ws, v);
+      return;
+    }
+    const v = this.hostView();
+    const lite = { ...v, quiz: undefined, sameQuiz: true };
+    this.quizSent ||= new Map();
+    for (const ws of this.sockets("host")) {
+      const same = this.quizSent.get(ws) === v.quiz;
+      if (!same) this.quizSent.set(ws, v.quiz);
+      this.send(ws, same && v.quiz ? lite : v);
+    }
   }
 
   playerView(id) {
@@ -1038,6 +1089,8 @@ export class Room {
   }
 
   async webSocketClose(ws) {
+    this.budget?.delete(ws);
+    this.quizSent?.delete(ws);
     if ((ws.deserializeAttachment() || {}).role === "player" && (await this.game())) this.hostsUpdate();
   }
 }
