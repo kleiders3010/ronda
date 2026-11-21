@@ -683,11 +683,22 @@ async function makeRoom() {
 // break down"): this site's own (Cloudflare) and the game host's (games.jurisgames.com/ronda). A code's digits say
 // which one made it (an even sum: the first). When one stops answering, the host's screen moves the game to the
 // other and everyone follows.
+// Test switches (?server= etc.) take only our own hosts, this computer, or addresses that can never connect (.invalid,
+// for failover tests): a crafted link can never point the app at somebody else's server (APP-RULES safety 1).
+const testHost = (u) => {
+  try {
+    const x = new URL(u);
+    if (!/^(wss?|https?):$/.test(x.protocol)) return null;
+    const h = x.hostname;
+    return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(h) || /(^|\.)jurisgames\.com$/.test(h) || /\.invalid$/.test(h) ? u : null;
+  } catch { return null; }
+};
 const RP = new URLSearchParams(location.search);
+const RPG = (k) => (RP.get(k) ? testHost(RP.get(k)) : null);
 const OURS = /(^|\.)jurisgames\.com$|\.github\.io$/.test(location.hostname);
 const SERVERS = [
-  RP.get("server") || (location.hostname.endsWith(".github.io") ? "wss://quiz.jurisgames.com" : location.origin.replace(/^http/, "ws")),
-  RP.get("server2") || (OURS && !RP.get("server") ? "wss://games.jurisgames.com/ronda" : null),
+  RPG("server") || (location.hostname.endsWith(".github.io") ? "wss://quiz.jurisgames.com" : location.origin.replace(/^http/, "ws")),
+  RPG("server2") || (OURS && !RPG("server") ? "wss://games.jurisgames.com/ronda" : null),
 ];
 const sideOf = (code) => [...code].reduce((a, d) => a + Number(d), 0) % 2;
 const homeOf = (code) => (SERVERS[1] && sideOf(code) ? 1 : 0);
@@ -1224,6 +1235,8 @@ function hostScreen(code) {
     // this server lost the ronda (or never had it): it carries on from the copy
     if (m.t === "gone" && snap.quiz) return resume(at);
     if (m.t === "moved") return;
+    // the other server would not take the game (no proof it is ours): never lose it, wait for its own server
+    if (m.t === "denied" && at !== homeOf(code)) { saved.at = homeOf(code); keep(); return live.move(homeOf(code)); }
     if (m.t === "denied" || m.t === "gone") { toast(t("This ronda has ended")); sessionStorage.removeItem("host:" + code); return go("/", true); }
     if (m.t === "bad-quiz") { toast(t("Something in this ronda can't be used")); return go("/", true); }
     if (m.t === "export") return saveResults(m);

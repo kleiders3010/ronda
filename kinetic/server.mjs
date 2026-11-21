@@ -19,7 +19,7 @@ if (!globalThis.crypto) globalThis.crypto = webcrypto;
 if (typeof Response.json !== "function")
   Response.json = (d, init = {}) => new Response(JSON.stringify(d), { ...init, headers: { ...(init.headers || {}), "content-type": "application/json" } });
 
-const { Room, newRoom } = await import(process.env.RONDA_ROOM || "./room.mjs");
+const { Room, newRoom, ipKey } = await import(process.env.RONDA_ROOM || "./room.mjs");
 
 const PORT = Number(process.env.PORT) || 8789;
 const BIND = process.env.BIND || "0.0.0.0";
@@ -93,8 +93,12 @@ class State {
     this.storage = new Storage(name);
     this.sockets = new Set();
   }
-  acceptWebSocket(ws) {
+  acceptWebSocket(ws, tags) {
+    ws.tags = tags || [];
     this.sockets.add(ws);
+  }
+  getTags(ws) {
+    return ws.tags || [];
   }
   getWebSockets() {
     return [...this.sockets];
@@ -117,7 +121,12 @@ function roomOf(name) {
 const run = (r, f) => (r.chain = (r.chain || Promise.resolve()).then(f).catch((e) => console.error("ronda room error:", e && e.message)));
 
 // what newRoom() expects of Cloudflare's Durable Object namespace
+// the key both servers sign hosts' tokens with (worker/src/index.js proven()); never printed
+let resumeKey = process.env.RESUME_KEY || "";
+if (!resumeKey) try { resumeKey = readFileSync(join(DATA, "resume-key"), "utf8").trim(); } catch (_) {}
+if (!resumeKey) console.log("no resume key: games can't move here from the other server");
 const ENV = {
+  RESUME_KEY: resumeKey,
   SIDE: process.env.SIDE || "odd", // "even" makes it stand in for the Cloudflare side (tests)
   ROOMS: {
     idFromName: (name) => name,
@@ -205,7 +214,9 @@ server.on("upgrade", (req, socket, head) => {
     let att = null;
     ws.serializeAttachment = (v) => (att = clone(v));
     ws.deserializeAttachment = () => clone(att);
-    r.state.acceptWebSocket(ws);
+    const ip = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "?").split(",")[0].trim();
+    r.state.acceptWebSocket(ws, [m[1], "ip:none"]);
+    ipKey(ip).then((k) => (ws.tags[1] = k));
     ws.on("message", (data, binary) => {
       if (binary) return;
       run(r, () => r.room.webSocketMessage(ws, data.toString()));

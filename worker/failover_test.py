@@ -35,7 +35,7 @@ def check(ok, what):
 
 
 def up(i):
-    env = dict(os.environ, PORT=str(PORTS[i]), BIND="127.0.0.1", DATA_DIR=os.path.join(DATA, str(i)), SIDE=["even", "odd"][i])
+    env = dict(os.environ, PORT=str(PORTS[i]), BIND="127.0.0.1", DATA_DIR=os.path.join(DATA, str(i)), SIDE=["even", "odd"][i], RESUME_KEY="test-only-resume-key")
     procs[i] = subprocess.Popen(["node", "server.mjs"], cwd=KIN, env=env, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL, creationflags=0x08000000)
     for _ in range(50):

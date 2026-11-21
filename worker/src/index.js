@@ -136,7 +136,10 @@ export default {
     const m = url.pathname.match(/^\/ws\/(\d{6})$/);
     if (m) {
       if (req.headers.get("Upgrade") !== "websocket") return new Response("expected a websocket", { status: 426 });
-      return env.ROOMS.get(env.ROOMS.idFromName(m[1])).fetch(req);
+      const h = new Headers(req.headers);
+      h.set("x-room", m[1]);
+      h.set("x-ip-key", await ipKey(req.headers.get("CF-Connecting-IP")));
+      return env.ROOMS.get(env.ROOMS.idFromName(m[1])).fetch(new Request(req, { headers: h }));
     }
     if (url.pathname === "/health") return new Response("ok");
     return new Response("not found", { status: 404 });
@@ -149,15 +152,48 @@ function randomToken(n = 24) {
   return [...a].map((b) => "abcdefghijkmnpqrstuvwxyz23456789"[b % 32]).join("");
 }
 
+const ALPH = "abcdefghijkmnpqrstuvwxyz23456789";
+const enc = (s) => new TextEncoder().encode(s);
+
+// Only a hash of the address is kept (never the address), and only for that day: for the limits.
+export async function ipKey(ip) {
+  const day = new Date().toISOString().slice(0, 10);
+  const h = await crypto.subtle.digest("SHA-256", enc(day + "|ronda|" + (ip || "unknown")));
+  return "ip:" + [...new Uint8Array(h).slice(0, 8)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// A host's token proves the room was made by one of our two servers (APP-RULES safety 2): its last 12 characters
+// are a signature over the room code and the first 12, made with RESUME_KEY, which only the two servers know. A
+// server that lost a game (or never had it) takes it over only with such a token, never "nobody is here".
+async function sig(env, code, rand) {
+  if (!env || !env.RESUME_KEY) return null;
+  const key = await crypto.subtle.importKey("raw", enc(env.RESUME_KEY), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const s = new Uint8Array(await crypto.subtle.sign("HMAC", key, enc("ronda|" + code + "|" + rand)));
+  return [...s.slice(0, 12)].map((b) => ALPH[b % 32]).join("");
+}
+export async function hostToken(env, code) {
+  const rand = randomToken(12);
+  const s = await sig(env, code, rand);
+  return s ? rand + s : randomToken(24);
+}
+export async function proven(env, code, token) {
+  if (typeof token !== "string" || !/^[a-z0-9]{24}$/.test(token) || !/^\d{6}$/.test(String(code))) return false;
+  const s = await sig(env, code, token.slice(0, 12));
+  if (!s) return false;
+  let d = 0;
+  for (let i = 0; i < 12; i++) d |= s.charCodeAt(i) ^ token.charCodeAt(12 + i);
+  return d === 0;
+}
+
 // the site copy on GitHub Pages and the other server's site start rooms here too
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST", "Cache-Control": "no-store" };
 
 export async function newRoom(env) {
-  const token = randomToken();
   const side = env.SIDE === "odd" ? 1 : 0;
   for (let i = 0; i < 8; i++) {
     let code = String(100000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900000));
     if (sideOf(code) !== side) code = code.slice(0, 5) + ((Number(code[5]) + 1) % 10);
+    const token = await hostToken(env, code);
     const r = await env.ROOMS.get(env.ROOMS.idFromName(code)).fetch("https://room/claim", { method: "POST", body: token });
     if (r.ok) return Response.json({ code, token }, { headers: CORS });
   }
@@ -302,8 +338,9 @@ export const readMsOf = (g, q) => (g.teams?.talk && q.time ? TALK_MS : READ_MS);
 const rangeOf = (q) => (q.kind === "slider" ? { min: q.min, max: q.max, dec: q.dec, unit: q.unit || "" } : null);
 
 export class Room {
-  constructor(state) {
+  constructor(state, env) {
     this.state = state;
+    this.env = env || {};
     this.g = null; // the game, loaded from storage on first use (the object may have slept)
     this.flushTimer = null;
   }
@@ -362,7 +399,7 @@ export class Room {
       return new Response("ok");
     }
     const pair = new WebSocketPair();
-    this.state.acceptWebSocket(pair[1]);
+    this.state.acceptWebSocket(pair[1], [req.headers.get("x-room") || "", req.headers.get("x-ip-key") || "ip:none"]);
     return new Response(null, { status: 101, webSocket: pair[0] });
   }
 
@@ -388,6 +425,7 @@ export class Room {
     // the host's screen brings the game over from the other server (or back after this one lost it)
     if (msg.t === "resume") {
       if (g && msg.token !== g.host) return this.send(ws, { t: "denied" });
+      if (!g && !(await proven(this.env, this.state.getTags(ws)[0], msg.token))) return this.send(ws, { t: "denied" });
       const snap = cleanSnap(msg.snap, String(msg.token || ""));
       if (!snap || !/^[a-z0-9]{24}$/.test(snap.host)) return this.send(ws, { t: "bad-quiz" });
       for (const s of this.state.getWebSockets()) if (s !== ws && (s.deserializeAttachment() || {}).role === "host") s.close(1000, "moved");

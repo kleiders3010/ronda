@@ -64,7 +64,7 @@ if not LIVE:
     subprocess.run(["node", "pack.mjs"], cwd=kin, check=True, stdout=subprocess.DEVNULL)
     data = tempfile.mkdtemp(prefix="ronda_mt_")
     for i, side in enumerate(["even", "odd"]):
-        env = dict(os.environ, PORT=str(PORTS[i]), BIND="127.0.0.1", DATA_DIR=os.path.join(data, side), SIDE=side)
+        env = dict(os.environ, PORT=str(PORTS[i]), BIND="127.0.0.1", DATA_DIR=os.path.join(data, side), SIDE=side, RESUME_KEY="test-only-resume-key")
         procs.append(subprocess.Popen(["node", "server.mjs"], cwd=kin, env=env, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                                       stderr=subprocess.DEVNULL, creationflags=0x08000000))
     for port in PORTS:

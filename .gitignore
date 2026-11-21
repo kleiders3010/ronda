@@ -10,3 +10,4 @@ local.properties
 node_modules/
 kinetic/room.mjs
 kinetic/data/
+.dev.vars
