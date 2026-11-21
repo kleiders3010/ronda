@@ -770,8 +770,20 @@ function nameScreen(code) {
   setTimeout(() => $("#nameInput").focus(), 50);
 }
 
-let pid = safeGet("pid");
-if (!pid) { pid = randId(16); safeSet("pid", pid); }
+// A new secret id for every ronda (APP-RULES safety 3): it is what proves this phone is this player, so it is never
+// reused in another ronda. The server keeps only a one-way hash of it (all a host ever sees). Kept 60 days, 100 rondas.
+function pidFor(code) {
+  let m = {};
+  try { m = JSON.parse(safeGet("pids") || "{}") || {}; } catch {}
+  if (typeof m !== "object" || Array.isArray(m)) m = {};
+  const now = Date.now();
+  if (!m[code] || typeof m[code].id !== "string") m[code] = { id: randId(16) };
+  m[code].at = now;
+  const keep = Object.entries(m).filter(([, v]) => v && now - (v.at || 0) < 60 * 86400000).sort((a, b) => b[1].at - a[1].at).slice(0, 100);
+  safeSet("pids", JSON.stringify(Object.fromEntries(keep)));
+  return m[code].id;
+}
+try { localStorage.removeItem("pid"); } catch {} // the old one id for every ronda
 
 let timerRaf = 0;
 function countdown(node, endsIn, readIn, onEnd) {
@@ -806,7 +818,7 @@ function playScreen(code, name) {
   main.replaceChildren(el("p", "wait", t("Joining…")));
   let lastKey = "";
   const gone = new Set(); // servers that said they don't have this ronda
-  live = connect(code, () => live.send({ t: "join", id: pid, name }), (m, at) => {
+  live = connect(code, () => live.send({ t: "join", id: pidFor(code), name }), (m, at) => {
     if (m.t === "moved" && otherOf(at) !== at) return live.move(otherOf(at));
     if (m.t === "gone" && otherOf(at) !== at && !gone.has(otherOf(at))) {
       gone.add(at);

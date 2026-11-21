@@ -171,6 +171,10 @@ async function sig(env, code, rand) {
   const s = new Uint8Array(await crypto.subtle.sign("HMAC", key, enc("ronda|" + code + "|" + rand)));
   return [...s.slice(0, 12)].map((b) => ALPH[b % 32]).join("");
 }
+export async function handleOf(code, raw) {
+  const h = new Uint8Array(await crypto.subtle.digest("SHA-256", enc("ronda-player|" + code + "|" + raw)));
+  return [...h.slice(0, 16)].map((b) => ALPH[b % 32]).join("");
+}
 export async function hostToken(env, code) {
   const rand = randomToken(12);
   const s = await sig(env, code, rand);
@@ -453,8 +457,11 @@ export class Room {
       return this.toHost(ws);
     }
     if (msg.t === "join") {
-      const id = String(msg.id || "");
-      if (!/^[A-Za-z0-9_-]{8,40}$/.test(id)) return;
+      const raw = String(msg.id || "");
+      if (!/^[A-Za-z0-9_-]{8,40}$/.test(raw)) return;
+      // players are kept under a one-way hash of their secret id and this room's code: hosts, reports and exports
+      // see only that, which can't be turned back into the id that joins as them
+      const id = await handleOf(this.state.getTags(ws)[0], raw);
       let p = g.players[id];
       if (!p) {
         if (g.phase === "end" || (g.self && Date.now() >= g.self.until)) return this.send(ws, { t: "over" });
