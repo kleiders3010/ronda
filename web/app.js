@@ -881,7 +881,7 @@ function playScreen(code, name, key = "") {
 // ---------------- audience questions (like Slido's Q&A) ----------------
 let qa = null; // the last list from the server
 let qaSort = "top";
-const qaVotes = (x) => x.n ?? x.up.length;
+const qaVotes = (x) => x.n ?? 0;
 // on the screen now first, then waiting for the host, then the rest by votes (or newest), answered last
 function qaSorted(list) {
   const rank = { hi: 0, wait: 1, "": 2, done: 3 };
@@ -1316,7 +1316,7 @@ function hostQa(m) {
   if (hi) {
     show.querySelector(".qaWho").textContent = hi.name ? t("{name} asks", { name: hi.name }) : t("Someone asks");
     show.querySelector(".qaBig").textContent = hi.text;
-    show.querySelector(".qaVotes").textContent = (hi.up.length === 1 ? t("1 vote") : t("{n} votes", { n: hi.up.length }));
+    show.querySelector(".qaVotes").textContent = (qaVotes(hi) === 1 ? t("1 vote") : t("{n} votes", { n: qaVotes(hi) }));
   }
   drawHostQa();
 }
@@ -1340,7 +1340,7 @@ function drawHostQa() {
     const li = el("li", "qaItem " + (x.st || "live"));
     const body = el("div", "qaBody");
     body.append(el("p", "qaText", x.text));
-    const meta = el("p", "qaMeta", (x.name || t("Anonymous")) + " · ▲ " + x.up.length);
+    const meta = el("p", "qaMeta", (x.name || t("Anonymous")) + " · ▲ " + qaVotes(x));
     if (QA_TAG[x.st]) meta.append(el("span", "qaTag " + x.st, t(QA_TAG[x.st])));
     const btns = el("div", "qaBtns");
     if (x.st === "wait") btns.append(act("Approve", "ok", x, "btn chip"));
@@ -1360,7 +1360,7 @@ function saveQuestions(title) {
   if (!qa?.list.length) return toast(t("No questions yet"));
   const status = { "": "", wait: t("Waiting for the host"), hi: t("On the screen now"), done: t("Answered") };
   const rows = [[t("Question"), t("Asked by"), t("Votes"), t("Status")],
-    ...qaSorted(qa.list).map((x) => [x.text, x.name || t("Anonymous"), x.up.length, status[x.st]])];
+    ...qaSorted(qa.list).map((x) => [x.text, x.name || t("Anonymous"), qaVotes(x), status[x.st]])];
   const csv = "\ufeff" + rows.map((r) => r.map(csvCell).join(",")).join("\r\n");
   downloadFile((title || "Ronda") + " - " + t("questions") + ".csv", csv, "text/csv");
   toast(t("Questions saved to your downloads"));

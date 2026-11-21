@@ -100,11 +100,15 @@ export function cleanQa(x, players) {
     let st = QA_ST.includes(it.st) ? it.st : "";
     if (st === "hi") (hi ? (st = "") : (hi = true));
     const up = [...new Set((Array.isArray(it.up) ? it.up : []).map(String))].filter((p) => players[p]);
+    const carry = [...new Set((Array.isArray(it.v) ? it.v : []).map(String))].filter((v) => /^[a-z0-9]{12}$/.test(v)).slice(0, MAX_PLAYERS);
+    const base = Math.max(0, Math.min(MAX_PLAYERS, Math.trunc(Number(it.n)) || 0) - up.length - carry.length);
     qa.list.push({ id, by: players[it.by] ? String(it.by) : "", name: str(it.name, 30), text,
-      at: Math.trunc(Number(it.at)) || Date.now(), up, st });
+      at: Math.trunc(Number(it.at)) || Date.now(), up, st, ...(base ? { base } : {}), ...(carry.length ? { carry } : {}) });
   }
   return qa;
 }
+// an audience question's votes: the ones made here, plus a count carried over from the other server
+const votes = (x) => (x.base || 0) + (x.carry?.length || 0) + x.up.length;
 // kinds with a right answer: points, ranking, podium
 export const scored = (kind) => kind === "quiz" || kind === "type" || kind === "order" || kind === "slider";
 // Kahoot's Slider (help 'Kahoot! question types'): a number between min and max; answers within the margin count
@@ -203,6 +207,13 @@ export function overBudget(room, ws) {
   if (++x.n <= (BUDGET[role] || BUDGET.none)) return false;
   try { ws.close(1008, "too many messages"); } catch (_) {}
   return true;
+}
+
+// A vote as the host's copy of the game carries it: only the two servers can make (and so match) it, and it differs
+// for every question, so the host's screen can't tell who voted, nor that two votes are the same person's
+export async function voteTok(env, code, qid, id) {
+  const s = await sig(env, code, "vote|" + qid + "|" + id);
+  return s;
 }
 
 export async function handleOf(code, raw) {
@@ -539,6 +550,7 @@ export class Room {
       }
       if (p.out) return this.send(ws, { t: "removed" });
       ws.serializeAttachment({ role: "player", id });
+      await this.claimVotes(this.state.getTags(ws)[0], id);
       if (g.self) {
         await this.selfCatchUp(id);
         this.send(ws, this.playerView(id));
@@ -558,7 +570,7 @@ export class Room {
       }
       if (msg.t === "answer") return this.answer(me.id, msg);
       if (msg.t === "ask") return this.ask(ws, me.id, msg);
-      if (msg.t === "vote") return this.vote(me.id, msg);
+      if (msg.t === "vote") return this.vote(me.id, msg, this.state.getTags(ws)[0]);
       // in the lobby people may pick their own team (Kahoot: "Players can choose their team when they join")
       if (msg.t === "team" && g.phase === "lobby" && g.teams) {
         const k = Number(msg.team);
@@ -789,13 +801,33 @@ export class Room {
     this.qaUpdate();
   }
 
-  async vote(id, msg) {
+  async claimVotes(code, id) {
+    let n = 0;
+    for (const it of this.g.qa.list) {
+      if (!it.carry?.length) continue;
+      const tok = await voteTok(this.env, code, it.id, id);
+      const k = tok ? it.carry.indexOf(tok) : -1;
+      if (k < 0) continue;
+      it.carry.splice(k, 1);
+      if (!it.up.includes(id)) it.up.push(id);
+      (it.tk ||= {})[id] = tok;
+      n++;
+    }
+    if (n) await this.save();
+  }
+
+  async vote(id, msg, code) {
     const it = this.g.qa.list.find((x) => x.id === msg.id);
     if (!it || it.st === "wait" || it.st === "done") return;
     const k = it.up.indexOf(id);
-    if (msg.up && k < 0) it.up.push(id);
-    else if (!msg.up && k >= 0) it.up.splice(k, 1);
-    else return;
+    if (msg.up && k < 0) {
+      it.up.push(id);
+      const tok = await voteTok(this.env, code, it.id, id);
+      if (tok) (it.tk ||= {})[id] = tok;
+    } else if (!msg.up && k >= 0) {
+      it.up.splice(k, 1);
+      if (it.tk) delete it.tk[id];
+    } else return;
     await this.save();
     this.qaUpdate();
   }
@@ -823,13 +855,14 @@ export class Room {
   hostQa() {
     const { open, mod, list } = this.g.qa;
     // an anonymous question doesn't tell the host who asked
-    return { t: "qa", open, mod, list: list.map((x) => ({ ...x, by: x.name ? x.by : "" })) };
+    return { t: "qa", open, mod, list: list.map((x) => ({ id: x.id, by: x.name ? x.by : "", name: x.name, text: x.text, at: x.at, st: x.st, n: votes(x),
+      v: [...x.up.map((id) => x.tk?.[id]).filter(Boolean), ...(x.carry || [])] })) };
   }
 
   playerQa(id) {
     const { open, mod, list } = this.g.qa;
     return { t: "qa", open, mod, list: list.filter((x) => x.st !== "wait" || x.by === id).map((x) => (
-      { id: x.id, name: x.name, text: x.text, at: x.at, st: x.st, n: x.up.length, me: x.up.includes(id), mine: x.by === id })) };
+      { id: x.id, name: x.name, text: x.text, at: x.at, st: x.st, n: votes(x), me: x.up.includes(id), mine: x.by === id })) };
   }
 
   // votes come in bursts: one update for everyone every quarter second at most (the host's own actions go at once)
