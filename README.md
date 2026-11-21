@@ -46,6 +46,10 @@ their phone with a short code. No account, no player limit, nothing to install, 
 - Download the results as a spreadsheet (CSV). Share a ronda as a link: the whole quiz travels inside the link.
 - Send feedback (start page and the big screen): a problem or an idea, an optional email for an answer and, if you keep the tick, technical details (browser, page, errors; never quiz content or names). "See what's sent" shows it all first. Emailed to hello@jurisgames.com through [jurisgames-feedback](https://github.com/kleiders3010/jurisgames-feedback), which stores nothing.
 
+## Problems or ideas
+
+In the app: Send feedback. If the app doesn't open at all, open an issue at https://github.com/kleiders3010/ronda/issues or email hello@jurisgames.com.
+
 ## How it works
 What you make is saved in your browser. When you press Start, a small Cloudflare Worker (`worker/`) opens a live
 room (one Durable Object per 6-digit code) that runs the game and deletes everything when the room is closed, or
