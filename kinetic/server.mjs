@@ -31,6 +31,16 @@ const MAX_MSG = 256 * 1024 + 1024; // a whole quiz arrives in one message
 const NEW_PER_MINUTE = 30; // rooms one address may start in a minute
 mkdirSync(DATA, { recursive: true });
 
+// What the sweep needs to know of each room file on disk: read once at start, then kept up to date on every write,
+// so the sweep never re-reads the folder (APP-RULES safety 14: work proportional to what changed).
+const MAX_FILES = 50000; // the data folder shares a disk with the other games: no new rooms past this
+const disk = new Map(); // file -> { name, alarm, ... }
+const summary = (m) => ({ name: m.__name || "", alarm: Number(m.__alarm) || 0, g: !!m.g });
+for (const f of readdirSync(DATA)) {
+  if (!f.endsWith(".json")) continue;
+  try { disk.set(join(DATA, f), summary(JSON.parse(readFileSync(join(DATA, f), "utf8")))); } catch (_) {}
+}
+
 // ---- the Durable Object stand-in ----
 
 const fileOf = (name) => join(DATA, createHash("sha256").update(name).digest("hex").slice(0, 32) + ".json");
@@ -54,9 +64,14 @@ class Storage {
   flush() {
     clearTimeout(this.timer);
     try {
-      if (!this.map.size) return void unlinkSync(this.file);
-      writeFileSync(this.file + ".tmp", JSON.stringify({ __name: this.name, ...Object.fromEntries(this.map) }));
+      if (!this.map.size) {
+        disk.delete(this.file);
+        return void unlinkSync(this.file);
+      }
+      const all = { __name: this.name, ...Object.fromEntries(this.map) };
+      writeFileSync(this.file + ".tmp", JSON.stringify(all));
       renameSync(this.file + ".tmp", this.file);
+      disk.set(this.file, summary(all));
     } catch (_) {}
   }
   async get(k) {
@@ -154,16 +169,17 @@ async function sweep(force) {
     }
   }
   if (force) return;
-  for (const f of readdirSync(DATA)) {
-    if (!f.endsWith(".json")) continue;
+  for (const [file, s] of [...disk]) {
+    if (!s.name || rooms.has(s.name)) continue;
     try {
-      const m = JSON.parse(readFileSync(join(DATA, f), "utf8"));
-      if (!m.__name || rooms.has(m.__name)) continue;
-      if (m.__alarm && m.__alarm <= now) {
-        const r = roomOf(m.__name);
+      if (s.alarm && s.alarm <= now) {
+        const r = roomOf(s.name);
         r.state.storage.map.delete("__alarm");
         await run(r, () => r.room.alarm());
-      } else if (!m.__alarm && !m.g) unlinkSync(join(DATA, f));
+      } else if (!s.alarm && !s.g) {
+        disk.delete(file);
+        unlinkSync(file);
+      }
     } catch (_) {}
   }
 }
@@ -188,6 +204,10 @@ const server = http.createServer(async (req, res) => {
     return res.end();
   }
   if (path === "/api/new" && req.method === "POST") {
+    if (disk.size >= MAX_FILES) {
+      res.writeHead(503, { "content-type": "application/json", ...cors });
+      return res.end(JSON.stringify({ error: "busy" }));
+    }
     const ip = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "?").split(",")[0].trim();
     const n = (starts.get(ip) || 0) + 1;
     starts.set(ip, n);
