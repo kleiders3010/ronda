@@ -22,7 +22,7 @@ if (typeof Response.json !== "function")
 const { Room, newRoom, ipKey, idleClose } = await import(process.env.RONDA_ROOM || "./room.mjs");
 
 const PORT = Number(process.env.PORT) || 8789;
-const BIND = process.env.BIND || "0.0.0.0";
+const BIND = process.env.BIND || "127.0.0.1"; // behind the game host's door only (safety round 2, J18)
 const DATA = process.env.DATA_DIR || join(process.cwd(), "data");
 const MAX_ROOMS = 2000; // rooms held in memory at once (a room with nobody in it is put away after IDLE_MS)
 const IDLE_MS = 10 * 60 * 1000;
