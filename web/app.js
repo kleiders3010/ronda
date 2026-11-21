@@ -765,7 +765,7 @@ function nameScreen(code) {
     const name = $("#nameInput").value.trim();
     if (!name) return $("#nameInput").focus();
     safeSet("name", name);
-    playScreen(code, name);
+    playScreen(code, name, (location.hash.match(/^#k=([a-z0-9]{8,40})$/) || [])[1] || "");
   };
   setTimeout(() => $("#nameInput").focus(), 50);
 }
@@ -810,7 +810,7 @@ function timerBar() {
   return d;
 }
 
-function playScreen(code, name) {
+function playScreen(code, name, key = "") {
   show("play");
   $("#pName").textContent = name;
   $("#pScore").textContent = "";
@@ -818,13 +818,16 @@ function playScreen(code, name) {
   main.replaceChildren(el("p", "wait", t("Joining…")));
   let lastKey = "";
   const gone = new Set(); // servers that said they don't have this ronda
-  live = connect(code, () => live.send({ t: "join", id: pidFor(code), name }), (m, at) => {
+  let seen = false; // a view came: "gone" now means it ended, not "no such code"
+  live = connect(code, () => live.send({ t: "join", id: pidFor(code), name, k: key }), (m, at) => {
     if (m.t === "moved" && otherOf(at) !== at) return live.move(otherOf(at));
     if (m.t === "gone" && otherOf(at) !== at && !gone.has(otherOf(at))) {
       gone.add(at);
       return live.move(otherOf(at));
     }
-    if (m.t === "view") gone.clear();
+    if (m.t === "view") gone.clear(), (seen = true);
+    if (m.t === "slow") return endMsg(t("Too many tries from this network. Wait a minute and try again."));
+    if (m.t === "gone" && !seen) return endMsg(t("No ronda is running with this code. For an assignment, open the link you were sent."));
     if (m.t === "gone" || m.t === "closed") return endMsg(t("This ronda has ended. Thanks for playing!"));
     if (m.t === "over") return endMsg(t("This ronda has already finished."));
     if (m.t === "full") return endMsg(t("This ronda is full ({max} people)", { max: m.max }));
@@ -839,7 +842,7 @@ function playScreen(code, name) {
     $("#pTeam").replaceChildren(...(m.team ? [teamDot(m.team.k), m.team.name] : []));
     $("#pTeam").hidden = !m.team;
     // keep a half-typed word when only the count changed
-    const key = [m.phase, m.qi, JSON.stringify(m.mine), m.phase === "lobby" ? JSON.stringify([m.teams, m.team?.k]) : ""].join("|");
+    const key = [m.phase, m.qi, JSON.stringify(m.mine), m.phase === "lobby" ? JSON.stringify([m.teams, m.team?.k]) : "", m.self && m.phase === "end" ? JSON.stringify([m.top, m.rank, m.of]) : ""].join("|");
     if (key === lastKey) return;
     lastKey = key;
     main.replaceChildren(...playerView(m));
@@ -945,13 +948,15 @@ function playerView(m) {
     if (m.quizzy) {
       out.push(el("p", "place", t("{rank} of {of}", { rank: ordinal(m.rank), of: m.of })),
         el("p", "wait", t("{r} of {n} right · {p} points", { r: m.right, n: m.of2, p: m.score })));
-      const ol = el("ol", "top5");
-      for (const [name, score] of m.top) {
-        const li = el("li", name === m.name ? "me" : "");
-        li.append(el("span", "", name), el("b", "", String(score)));
-        ol.append(li);
+      if (m.top) {
+        const ol = el("ol", "top5");
+        for (const [name, score] of m.top) {
+          const li = el("li", name === m.name ? "me" : "");
+          li.append(el("span", "", name), el("b", "", String(score)));
+          ol.append(li);
+        }
+        out.push(ol);
       }
-      out.push(ol);
     } else out.push(el("p", "wait", t("Thanks for taking part")));
     out.push(homeLink());
     return out;
@@ -1816,6 +1821,11 @@ function openAssign(q) {
   mix.checked = true;
   const mixRow = el("label", "anon");
   mixRow.append(mix, " " + t("Mix the order of the answers on each phone"));
+  const top = el("input");
+  top.type = "checkbox";
+  top.name = "top";
+  const topRow = el("label", "anon");
+  topRow.append(top, " " + t("Show the top 5 names and points to people when they finish"));
   const out = el("p", "msg");
   out.hidden = true;
   const cancel = el("button", "btn ghost", t("Cancel"));
@@ -1827,7 +1837,7 @@ function openAssign(q) {
   row.append(cancel, make);
   box.append(el("h2", "asgHead", t("Assign")),
     el("p", "small", t("Everyone plays on their own phone, at their own pace, until the time you pick. No big screen.")),
-    el("label", "asgLabel", t("Answer by")), when, mixRow);
+    el("label", "asgLabel", t("Answer by")), when, mixRow, topRow);
   if (q.questions.some((x) => x.img || x.aimg?.some(Boolean))) box.append(el("p", "small", t("Pictures stay on this device: phones get the words only.")));
   box.append(out, row);
   sheet.append(box);
@@ -1855,7 +1865,7 @@ function openAssign(q) {
     closeLive();
     live = connect(room.code, () => {
       live.send({ t: "host", token: room.token });
-      live.send({ t: "assign", quiz, until, mix: mix.checked });
+      live.send({ t: "assign", quiz, until, mix: mix.checked, top: top.checked });
     }, (m) => {
       if (m.t === "report") {
         putAssigned(rec);
@@ -1897,7 +1907,7 @@ function reportScreen(code) {
   $("#rTitle").textContent = rec.title;
   $("#rMain").replaceChildren(el("p", "small", t("Loading…")));
   $("#rCtl").replaceChildren();
-  drawShare(code);
+  if (rec.key) drawShare(code, rec.key);
   let editingUntil = false;
   live = connect(code, () => live.send({ t: "host", token: rec.token }), (m) => {
     if (m.t === "gone" || m.t === "closed" || m.t === "denied") {
@@ -1911,6 +1921,7 @@ function reportScreen(code) {
     if (m.t !== "report") return;
     rec.until = m.until;
     rec.open = m.open; // the server's word, not this device's clock
+    if (m.key !== rec.key || !$("#rShare").childElementCount) drawShare(code, (rec.key = m.key));
     putAssigned(rec);
     if (!editingUntil) drawCtl(m);
     drawReport(m);
@@ -1949,6 +1960,11 @@ function reportScreen(code) {
       };
       btns.append(move, armed(el("button", "btn chip", t("End now")), t("Tap again to end it"), () => live.send({ t: "end" })));
     }
+    if (m.people && m.quiz.questions.some((q) => scored(q.kind))) {
+      const top = el("button", "btn chip", m.top ? t("Top 5 shown at the end: hide it") : t("Top 5 hidden at the end: show it"));
+      top.onclick = () => live.send({ t: "top", on: !m.top });
+      btns.append(top);
+    }
     const save = el("button", "btn chip", t("Download results"));
     save.onclick = () => saveResults(asResults(m));
     btns.append(save, armed(el("button", "btn chip danger-text", t("Delete")), t("Tap again to delete"), () => live.send({ t: "close" })));
@@ -1956,8 +1972,8 @@ function reportScreen(code) {
   }
 }
 
-function drawShare(code) {
-  const link = location.origin + BASE + code + location.search;
+function drawShare(code, key) {
+  const link = location.origin + BASE + code + location.search + (key ? "#k=" + key : "");
   const box = $("#rShare");
   box.hidden = false;
   const copy = el("button", "btn primary", t("Copy link"));
@@ -1965,7 +1981,7 @@ function drawShare(code) {
     try { await navigator.clipboard.writeText(link); toast(t("Link copied")); } catch { toast(link, 8000); }
   };
   const left = el("div", "rShareText");
-  left.append(el("p", "small", t("Send the link, or people enter the code at {site}", { site: location.host + BASE.replace(/\/$/, "") })),
+  left.append(el("p", "small", key ? t("Send this link: the code alone doesn't open an assignment.") : t("Send the link, or people enter the code at {site}", { site: location.host + BASE.replace(/\/$/, "") })),
     el("p", "rCode", fmtCode(code)), el("p", "rLink", link), copy);
   box.replaceChildren(left);
   try { box.append(qr(link)); } catch {}

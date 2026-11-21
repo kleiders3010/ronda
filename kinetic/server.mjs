@@ -140,8 +140,13 @@ const run = (r, f) => (r.chain = (r.chain || Promise.resolve()).then(f).catch((e
 let resumeKey = process.env.RESUME_KEY || "";
 if (!resumeKey) try { resumeKey = readFileSync(join(DATA, "resume-key"), "utf8").trim(); } catch (_) {}
 if (!resumeKey) console.log("no resume key: games can't move here from the other server");
+// the game host's copy of Cloudflare's JOINS limit (100 per address per minute); JOIN_LIMIT only for tests
+const joins = new Map();
+const JOIN_LIMIT = Number(process.env.JOIN_LIMIT) || 100;
+setInterval(() => joins.clear(), 60000).unref();
 const ENV = {
   RESUME_KEY: resumeKey,
+  JOINS: { limit: async ({ key }) => { const n = (joins.get(key) || 0) + 1; joins.set(key, n); return { success: n <= JOIN_LIMIT }; } },
   SIDE: process.env.SIDE || "odd", // "even" makes it stand in for the Cloudflare side (tests)
   ROOMS: {
     idFromName: (name) => name,

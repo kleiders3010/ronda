@@ -14,6 +14,12 @@ const BUDGET_MS = 10000;
 const BUDGET = { player: 40, host: 300, none: 10 }; // messages per socket per 10 s, then it is closed
 const MAX_SOCKETS = MAX_PLAYERS + 50; // per room
 const JOIN_MS = 10000; // a socket that has not joined or hosted by then is closed
+// New joins and failed lookups per address per minute (wrangler.toml JOINS; APP-RULES safety 5): codes can't be
+// tried by the thousand. Rejoins and hosts with their token don't count.
+export async function lookupOk(env, ws) {
+  if (!env || !env.JOINS) return true;
+  try { return (await env.JOINS.limit({ key: ws.__ip || "" })).success; } catch (_) { return true; }
+}
 const MAX_MSG = 256 * 1024; // a whole quiz arrives in one message
 const ROOM_TTL = 6 * 3600 * 1000;
 const KINDS = ["quiz", "poll", "words", "scale", "type", "order", "slider"];
@@ -202,6 +208,12 @@ export async function hostToken(env, code) {
   const rand = randomToken(12);
   const s = await sig(env, code, rand);
   return s ? rand + s : randomToken(24);
+}
+export function same(a, b) {
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
 }
 export async function proven(env, code, token) {
   if (typeof token !== "string" || !/^[a-z0-9]{24}$/.test(token) || !/^\d{6}$/.test(String(code))) return false;
@@ -438,6 +450,12 @@ export class Room {
     } catch (_) {}
   }
 
+  // what someone without the token or key hears: exactly what a code nobody uses says
+  async nope(ws) {
+    if (!(await lookupOk(this.env, ws))) return this.send(ws, { t: "slow" });
+    this.send(ws, { t: "gone" });
+  }
+
   sockets(role) {
     return this.state.getWebSockets().filter((ws) => (ws.deserializeAttachment() || {}).role === role);
   }
@@ -452,6 +470,7 @@ export class Room {
       return;
     }
     let g = await this.game();
+    ws.__ip = this.state.getTags(ws)[1] || "ip:none";
     // the host's screen brings the game over from the other server (or back after this one lost it)
     if (msg.t === "resume") {
       if (g && msg.token !== g.host) return this.send(ws, { t: "denied" });
@@ -466,11 +485,16 @@ export class Room {
       this.qaSend();
       return this.everyone();
     }
-    if (!g) return this.send(ws, { t: "gone" });
     const me = ws.deserializeAttachment() || {};
+    const lookup = msg.t === "join" || msg.t === "host" || msg.t === "moved";
+    if (!g) {
+      if (!lookup) return;
+      if (!(await lookupOk(this.env, ws))) return this.send(ws, { t: "slow" });
+      return this.send(ws, { t: "gone" });
+    }
     // the game went on on the other server: whoever is still here follows it
     if (msg.t === "moved") {
-      if (msg.token !== g.host) return this.send(ws, { t: "denied" });
+      if (msg.token !== g.host) return this.nope(ws);
       for (const s of this.state.getWebSockets()) this.send(s, { t: "moved" });
       this.g = null;
       await this.state.storage.deleteAll();
@@ -478,7 +502,7 @@ export class Room {
     }
 
     if (msg.t === "host") {
-      if (msg.token !== g.host) return this.send(ws, { t: "denied" });
+      if (msg.token !== g.host) return this.nope(ws);
       ws.serializeAttachment({ role: "host" });
       return this.toHost(ws);
     }
@@ -492,6 +516,9 @@ export class Room {
       if (me.role && !(me.role === "player" && me.id === id)) return;
       let p = g.players[id];
       if (!p) {
+        // an assignment is reached with its link's key, never with the code alone (that is for live games)
+        if (g.self?.key && !same(String(msg.k || ""), g.self.key)) return this.nope(ws);
+        if (!(await lookupOk(this.env, ws))) return this.send(ws, { t: "slow" });
         if (g.phase === "end" || (g.self && Date.now() >= g.self.until)) return this.send(ws, { t: "over" });
         if (g.locked) return this.send(ws, { t: "locked" });
         // removed people still hold their name, but not a place
@@ -541,6 +568,11 @@ export class Room {
     if (msg.t === "assign" && g.phase === "lobby" && !g.quiz && !Object.keys(g.players).length) return this.assign(ws, msg);
     if (g.self) {
       if (msg.t === "until" || msg.t === "end") return this.selfUntil(msg);
+      if (msg.t === "top") {
+        g.self.top = !!msg.on;
+        await this.save();
+        return this.everyone();
+      }
       if (msg.t !== "remove" && msg.t !== "close") return;
     }
 
@@ -825,7 +857,8 @@ export class Room {
     if (!(until > now + 60000) || until > now + MAX_DAYS * 86400000 + 3600000) return this.send(ws, { t: "bad-until" });
     g.quiz = quiz;
     g.phase = "self";
-    g.self = { until, made: now, mix: msg.mix !== false }; // pinned: answers mixed on each phone unless turned off
+    // pinned: answers mixed on each phone unless turned off; pinned: the top 5 is off unless the host turns it on
+    g.self = { until, made: now, mix: msg.mix !== false, top: msg.top === true, key: randomToken(12) };
     g.qa.open = false;
     await this.save(true);
     await this.plan();
@@ -957,7 +990,7 @@ export class Room {
     if (p.ph === "end") {
       const right = g.quiz.questions.filter((q, i) => scored(q.kind) && p.ans[i] && isRight(q, p.ans[i].v)).length;
       return { ...base, rank, of: r.length, right, of2: g.quiz.questions.filter((q) => scored(q.kind)).length,
-        top: r.slice(0, 5).map((x) => [x.name, x.score]), done: !!p.done };
+        top: g.self.top ? r.slice(0, 5).map((x) => [x.name, x.score]) : null, done: !!p.done };
     }
     const q = g.quiz.questions[p.qi];
     const mix = p.mix?.[p.qi];
@@ -984,6 +1017,7 @@ export class Room {
       ans: g.quiz.questions.map((_, i) => (p.ans[i] ? p.ans[i].v : null)),
     })).sort((a, b) => b.score - a.score);
     return { t: "report", quiz: g.quiz, until: g.self.until, made: g.self.made, mix: g.self.mix, open: this.selfOpen(),
+      key: g.self.key || "", top: !!g.self.top,
       keep: g.self.until + KEEP_MS, people };
   }
 

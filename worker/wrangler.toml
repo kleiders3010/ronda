@@ -20,3 +20,9 @@ class_name = "Room"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Room"]
+
+# new joins and failed lookups: 100 per address per minute in each Cloudflare location (index.js lookupOk)
+[[ratelimits]]
+name = "JOINS"
+namespace_id = "2101"
+simple = { limit = 100, period = 60 }
