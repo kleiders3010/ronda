@@ -123,6 +123,11 @@ export function isRight(q, v) {
   return false;
 }
 // "Put in order": everyone sees the same mix, never already in order
+// "Put in order" (audit R9): a phone gets the items already mixed and answers in that order; only the server knows
+// the way back, so the right order never reaches a phone before the reveal
+export const toShown = (shuf, v) => (Array.isArray(v) ? v.map((i) => shuf.indexOf(i)) : v);
+export const fromShown = (shuf, raw) => (Array.isArray(raw) ? raw.map((j) => shuf[Number(j)]) : raw);
+
 export function shuffle(n) {
   const a = [...Array(n).keys()];
   if (n < 2) return a;
@@ -724,7 +729,7 @@ export class Room {
     if (g.endsAt && Date.now() > g.endsAt + 500) return;
     // team talk: the answers open when it is over (a little slack for clocks)
     if (g.endsAt && (g.readMs ?? READ_MS) > READ_MS && Date.now() < g.startedAt + g.readMs - 300) return;
-    const v = parseAnswer(q, msg.v, q.kind === "scale" ? null : g.ans[id]);
+    const v = parseAnswer(q, q.kind === "order" && g.shuf ? fromShown(g.shuf, msg.v) : msg.v, q.kind === "scale" ? null : g.ans[id]);
     if (v === undefined) return;
     g.ans[id] = { v, at: Date.now() };
     await this.save();
@@ -965,6 +970,7 @@ export class Room {
         if (!Number.isInteger(j) || j < 0 || j >= mix.length) return;
         raw = mix[j]; // the phone's order -> the question's
       }
+      if (q.kind === "order" && p.shuf?.[p.qi]) raw = fromShown(p.shuf[p.qi], raw);
       const v = parseAnswer(q, raw, p.ans[p.qi]);
       if (v === undefined) return;
       p.ans[p.qi] = { v, at: Date.now() };
@@ -1000,7 +1006,9 @@ export class Room {
     const common = { ...base, qi: p.qi, kind: q.kind, pts: q.pts ?? 1, text: q.text, answers, mine, range: rangeOf(q),
       last: p.qi === n - 1 };
     if (p.ph === "question") {
-      return { ...common, shuf: q.kind === "order" ? p.shuf?.[p.qi] : null, talk: false,
+      const sh = q.kind === "order" ? p.shuf?.[p.qi] : null;
+      const seen = sh ? { answers: sh.map((i) => q.answers[i]), mine: a == null ? null : toShown(sh, a.v) } : {};
+      return { ...common, ...seen, shuf: null, talk: false,
         endsIn: q.time ? Math.max(1, p.at + READ_MS + q.time * 1000 - now) : 0, readIn: Math.max(0, p.at + READ_MS - now) };
     }
     return { ...common, streak: p.streak || 0, rank, gained: p.gained || 0,
@@ -1102,8 +1110,10 @@ export class Room {
     const n = g.quiz.questions.length;
     const mine = g.ans[id]?.v ?? null;
     if (g.phase === "question") {
-      return { ...base, qi: g.qi, n, kind: q.kind, pts: q.pts ?? 1, text: q.text, answers: q.answers || null, mine,
-        shuf: q.kind === "order" ? g.shuf : null, range: rangeOf(q),
+      const sh = q.kind === "order" ? g.shuf : null;
+      return { ...base, qi: g.qi, n, kind: q.kind, pts: q.pts ?? 1, text: q.text,
+        answers: sh ? sh.map((i) => q.answers[i]) : q.answers || null, mine: sh && mine ? toShown(sh, mine) : mine,
+        shuf: null, range: rangeOf(q),
         endsIn: g.endsAt ? g.endsAt - Date.now() : 0, readIn: Math.max(0, g.startedAt + (g.readMs ?? READ_MS) - Date.now()),
         talk: (g.readMs ?? READ_MS) > READ_MS };
     }
