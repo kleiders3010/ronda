@@ -1839,9 +1839,10 @@ function sliderRes(q, r, asking) {
 function hash(s) { let h = 0; for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) | 0; return h; }
 
 function csvCell(v) {
-  let s = String(v);
-  // anything but a number that starts like a formula stays text ("=HYPERLINK(...)" as a name, or a one-item list)
-  if (typeof v !== "number" && /^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  let s = String(v).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
+  // anything but a number that starts like a formula stays text ("=HYPERLINK(...)" as a name, or a one-item list),
+  // also after leading spaces or control characters (APP-RULES 70)
+  if (typeof v !== "number" && /^[=+\-@]/.test(s.replace(/^[\s\x00-\x1f]+/, ""))) s = "'" + s;
   return /[",\r\n;]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 
