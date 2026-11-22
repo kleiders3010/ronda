@@ -12,6 +12,10 @@ const MAX_PLAYERS = 500;
 // limits (APP-RULES safety 5), far above what a real game does: a phone sends a message when someone presses
 const BUDGET_MS = 10000;
 const BUDGET = { player: 40, host: 300, none: 10 }; // messages per socket per 10 s, then it is closed
+// and per 10 minutes (APP-RULES safety 95: a burst allowance needs a sustained one; one socket inside the burst one
+// all day would cost more than the free plan's day). A game is a press or two per question.
+const LONG_MS = 10 * 60 * 1000;
+const LONG_BUDGET = { player: 600, host: 3000, none: 10 };
 const MAX_SOCKETS = MAX_PLAYERS + 50; // per room
 const JOIN_MS = 10000; // a socket that has not joined or hosted by then is closed
 // New joins and failed lookups per address per minute (wrangler.toml JOINS; APP-RULES safety 5): codes can't be
@@ -214,9 +218,10 @@ export function overBudget(room, ws) {
   const b = (room.budget ||= new Map());
   const now = Date.now();
   let x = b.get(ws);
-  if (!x || now - x.t > BUDGET_MS) b.set(ws, (x = { t: now, n: 0 }));
+  if (!x || now - x.t > BUDGET_MS) b.set(ws, (x = { t: now, n: 0, lt: x ? x.lt : now, ln: x ? x.ln : 0 }));
+  if (now - x.lt > LONG_MS) Object.assign(x, { lt: now, ln: 0 });
   const role = (ws.deserializeAttachment() || {}).role || "none";
-  if (++x.n <= (BUDGET[role] || BUDGET.none)) return false;
+  if (++x.n <= (BUDGET[role] || BUDGET.none) && ++x.ln <= (LONG_BUDGET[role] || LONG_BUDGET.none)) return false;
   try { ws.close(1008, "too many messages"); } catch (_) {}
   return true;
 }
