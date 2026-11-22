@@ -778,7 +778,10 @@ async function startHosting(q) {
 
 // a new room code on the first server that answers: { code, token, at } or null
 async function makeRoom() {
-  for (const at of SERVERS[1] ? [0, 1] : [0]) {
+  // the game host first when the page has both (item 46, Kleider: the unlimited route "should attempt do to the work
+  // before touching the cloudflare limits"): a room it runs costs nothing of Cloudflare's daily requests or awake time.
+  // Test pages that name their servers keep the order they name.
+  for (const at of SERVERS[1] ? (RPG("server") ? [0, 1] : [1, 0]) : [0]) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 6000);
     try {
