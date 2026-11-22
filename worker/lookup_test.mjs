@@ -1,6 +1,6 @@
 // APP-RULES safety 5 (audit R8): nobody learns whether a code is in use without its token or key, and new joins and
 // failed lookups per address are limited. Runs on the game host's server (JOIN_LIMIT 20), or against a running
-// Worker with its real limit of 100 per minute:
+// Worker with its real limit of 600 per minute:
 //   node worker/lookup_test.mjs                 (game host copy, port 8845)
 //   node worker/lookup_test.mjs ws://127.0.0.1:8788   (wrangler dev; run it last: it uses up this address's minute)
 import { spawn, execFileSync } from "node:child_process";
@@ -16,7 +16,7 @@ const { WebSocket } = await import(pathToFileURL(join(KIN, "node_modules", "ws",
 
 const PORT = 8845;
 const BASE = process.argv[2] || `ws://127.0.0.1:${PORT}`;
-const LIMIT = process.argv[2] ? 100 : 20; // pinned: wrangler.toml JOINS limit 100 per minute
+const LIMIT = process.argv[2] ? 600 : 20; // pinned: wrangler.toml JOINS limit 600 per minute (a hall of 500, audit R2-7)
 let fail = 0;
 const check = (ok, what) => { console.log((ok ? "ok   " : "FAIL ") + what); if (!ok) fail++; };
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));

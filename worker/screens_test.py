@@ -7,7 +7,7 @@ import sys
 sys.stdout.reconfigure(encoding='utf-8')
 from playwright.sync_api import sync_playwright
 
-SITE = sys.argv[1] if len(sys.argv) > 1 else "https://quiz.jurisgames.com"
+SITE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8788"  # the local test server (npx wrangler dev -c wrangler.test.toml --port 8788); the live site only when named
 LONG = "Which of these rivers flows through the most countries before it reaches the sea, counting every border it crosses?"
 ANS = ["The Danube, through ten countries", "The Nile, from Lake Victoria north", "The Amazon, mostly through Brazil", "The Rhine, from the Alps to the North Sea",
        "The Mekong, from Tibet to Vietnam", "The Niger, in a long arc through West Africa"]

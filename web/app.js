@@ -160,11 +160,31 @@ async function packQuiz(q) {
   for (const b of bytes) s += String.fromCharCode(b);
   return tag + btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
+const UNPACK_MAX = 2 * 1024 * 1024;
 async function unpackQuiz(s) {
   const tag = s[0];
   const bin = atob(s.slice(1).replace(/-/g, "+").replace(/_/g, "/"));
   let bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
-  if (tag === "z") bytes = new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer());
+  if (tag === "z") {
+    // read in pieces and stop at UNPACK_MAX (second-pass audit R2-10: a small crafted link could unpack to hundreds of
+    // MB and hang the tab before anything was asked; 100 questions fit many times over)
+    const r = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw")).getReader();
+    const parts = [];
+    let n = 0;
+    for (;;) {
+      const { done, value } = await r.read();
+      if (done) break;
+      n += value.length;
+      if (n > UNPACK_MAX) {
+        r.cancel().catch(() => {});
+        throw new Error("too big");
+      }
+      parts.push(value);
+    }
+    bytes = new Uint8Array(n);
+    let o = 0;
+    for (const p of parts) bytes.set(p, (o += p.length) - p.length);
+  }
   return JSON.parse(new TextDecoder().decode(bytes));
 }
 // questions without their pictures: what links and the server get (pictures stay on this device, pics.js)
@@ -747,7 +767,12 @@ async function startHosting(q) {
     const a = src.aimg && x.answers ? x.answers.map((v, j) => [v, src.aimg[j] || null]).filter(([v]) => v.trim()).map(([, k]) => k) : null;
     return src.img || a ? { q: src.img || null, a } : null;
   });
-  sessionStorage.setItem(hostKey(code), JSON.stringify({ token, at, quiz: { title: q.title, questions }, pics }));
+  try {
+    sessionStorage.setItem(hostKey(code), JSON.stringify({ token, at, quiz: { title: q.title, questions }, pics }));
+  } catch {
+    // (audit R2-11: this failed without a word) the game still runs in this tab; a reload can't bring it back
+    toast(t("This device couldn't keep this ronda. Keep this tab open until the end."));
+  }
   go("/host/" + code);
 }
 
@@ -878,7 +903,11 @@ function pidFor(code) {
   if (!m[code] || typeof m[code].id !== "string") m[code] = { id: randId(16) };
   m[code].at = now;
   const keep = Object.entries(m).filter(([, v]) => v && now - (v.at || 0) < 60 * 86400000).sort((a, b) => b[1].at - a[1].at).slice(0, 100);
-  safeSet("pids", JSON.stringify(Object.fromEntries(keep)));
+  // (audit R2-11: a phone that can't keep its id starts again as a new person after a reload; it is told once)
+  if (!safeSet("pids", JSON.stringify(Object.fromEntries(keep))) && !pidFor.told) {
+    pidFor.told = true;
+    toast(t("This phone can't save anything right now: if you reload, you join as someone new."));
+  }
   return m[code].id;
 }
 try { localStorage.removeItem("pid"); } catch {} // the old one id for every ronda
@@ -1351,6 +1380,8 @@ function hostScreen(code) {
     // this server lost the ronda (or never had it): it carries on from the copy
     if (m.t === "gone" && snap.quiz) return resume(at);
     if (m.t === "moved") return;
+    // this server can't keep the game any more (its day's writes are used up): it goes on on the other one
+    if (m.t === "savefail" && otherOf(at) !== at && !live.saveMoved) { live.saveMoved = true; saved.at = otherOf(at); keep(); return live.move(otherOf(at)); }
     // the other server would not take the game (no proof it is ours): never lose it, wait for its own server
     if (m.t === "denied" && at !== homeOf(code)) { saved.at = homeOf(code); keep(); return live.move(homeOf(code)); }
     if (m.t === "denied" || m.t === "gone") { toast(t("This ronda has ended")); sessionStorage.removeItem(hostKey(code)); return go("/", true); }
@@ -1365,7 +1396,7 @@ function hostScreen(code) {
     if (m.t !== "host") return;
     if (m.sameQuiz) m.quiz = snap.quiz; // the server sends the quiz once
     if (!m.quiz) return live.send({ t: "load", quiz: saved.quiz });
-    Object.assign(snap, { quiz: m.quiz, phase: m.phase, qi: m.qi, boardShown: m.boardShown, shuf: m.shuf || undefined });
+    Object.assign(snap, { quiz: m.quiz, phase: m.phase, qi: m.qi, boardShown: m.boardShown, shuf: m.shuf || undefined, locked: !!m.locked });
     snap.players = [...m.players, ...(m.out || []).map((id) => ({ id, out: true }))];
     snap.teams = m.teams || null;
     if (m.logq && m.qi >= 0) snap.log[m.qi] = m.logq;
@@ -1491,6 +1522,12 @@ function renderHost(code, m, fresh) {
   const next = $("#hNext");
   const active = m.players.length;
   $("#hInfo").textContent = m.phase === "lobby" ? "" : t("Code {code}", { code: fmtCode(code) }) + " · " + t("{n} people", { n: active });
+  // the lock is there all game long, not only in the lobby (audit R2-6)
+  if (m.phase !== "lobby" && m.phase !== "end") {
+    const lk = el("button", "btn ghost small lockBtn", m.locked ? t("Unlock: let new people join") : t("Lock: nobody new can join"));
+    lk.onclick = () => live.send({ t: "lock", on: !m.locked });
+    $("#hInfo").append(" · ", lk);
+  }
 
   if (m.phase === "lobby") {
     next.textContent = t("Start");
@@ -1507,11 +1544,23 @@ function renderHost(code, m, fresh) {
       const people = el("div", "people");
       const lock = el("button", "btn ghost lockBtn");
       lock.onclick = () => live.send({ t: "lock", on: lock.dataset.on !== "1" });
-      main.replaceChildren(wrap, el("p", "count"), lock, people);
+      // a flood of made-up names goes in one tap pair (audit R2-7); shown only when someone joined in the last minute
+      const recent = el("button", "btn ghost recentBtn", t("Remove everyone who joined in the last minute"));
+      recent.onclick = () => {
+        if (recent.dataset.armed) return live.send({ t: "remove-recent" });
+        recent.dataset.armed = "1";
+        recent.textContent = t("Remove the {n} who joined in the last minute?", { n: recent.dataset.n || "" });
+        setTimeout(() => { if (recent.isConnected) { delete recent.dataset.armed; recent.textContent = t("Remove everyone who joined in the last minute"); } }, 3000);
+      };
+      main.replaceChildren(wrap, el("p", "count"), lock, recent, people);
     }
     const lockB = main.querySelector(".lockBtn");
     lockB.dataset.on = m.locked ? "1" : "";
     lockB.textContent = m.locked ? t("Unlock: let new people join") : t("Lock: nobody new can join");
+    const recentB = main.querySelector(".recentBtn");
+    const nRecent = m.players.filter((p) => p.recent).length;
+    recentB.hidden = nRecent < 2;
+    recentB.dataset.n = String(nRecent);
     main.querySelector(".count").textContent = !active ? t("Waiting for people…")
       : m.teams ? t("{n} people are in. Tap a name to move it to another team or remove it.", { n: active })
       : t("{n} people are in. Tap a name to remove it.", { n: active });
@@ -1887,8 +1936,9 @@ function assignedList() {
     return Array.isArray(list) ? list.filter((r) => r && /^\d{6}$/.test(r.code) && Date.now() < r.until + 30 * DAY) : [];
   } catch { return []; }
 }
-function saveAssigned(list) { safeSet("assigned", JSON.stringify(list)); }
-function putAssigned(rec) { saveAssigned([rec, ...assignedList().filter((r) => r.code !== rec.code)]); }
+function saveAssigned(list) { return safeSet("assigned", JSON.stringify(list)); }
+// (false: this device could not keep it, and so not the key to the report either: the screen says so, audit R2-11)
+function putAssigned(rec) { return saveAssigned([rec, ...assignedList().filter((r) => r.code !== rec.code)]); }
 function dropAssigned(code) { saveAssigned(assignedList().filter((r) => r.code !== code)); }
 
 // "2026-11-27T18:00" for a datetime input, in this device's time
@@ -1969,7 +2019,7 @@ function openAssign(q) {
       live.send({ t: "assign", quiz, until, mix: mix.checked, top: top.checked });
     }, (m) => {
       if (m.t === "report") {
-        putAssigned(rec);
+        if (!putAssigned(rec)) toast(t("This device couldn't keep the key to this assignment. Copy its link now: without it nobody can open the report."));
         sheet.remove();
         go("/report/" + room.code);
       } else if (m.t === "bad-quiz" || m.t === "bad-until") {
@@ -2149,9 +2199,9 @@ function drawReport(m) {
     } else if (q.kind === "scale" && vals.length) {
       li.append(el("p", "small", t("Average {a}", { a: (vals.reduce((x, y) => x + y, 0) / vals.length).toFixed(1) })));
     } else if (q.kind === "words" && vals.length) {
-      const c = {};
-      for (const list of vals) for (const w of list) c[w] = (c[w] || 0) + 1;
-      li.append(el("p", "small", Object.entries(c).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([w, k]) => `${w} (${k})`).join(" · ")));
+      const c = new Map();
+      for (const list of vals) for (const w of list) c.set(w, (c.get(w) || 0) + 1);
+      li.append(el("p", "small", [...c].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([w, k]) => `${w} (${k})`).join(" · ")));
     }
     ol.append(li);
   });

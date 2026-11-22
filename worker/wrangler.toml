@@ -21,11 +21,13 @@ class_name = "Room"
 tag = "v1"
 new_sqlite_classes = ["Room"]
 
-# new joins and failed lookups: 100 per address per minute in each Cloudflare location (index.js lookupOk)
+# new joins and failed lookups: 600 per address per minute in each Cloudflare location (index.js lookupOk): a hall of
+# 500 behind one school address joins in one minute (second-pass audit R2-7: 100 turned two thirds of a hall away);
+# floods of made-up names are for the host's "remove everyone who joined in the last minute"
 [[ratelimits]]
 name = "JOINS"
 namespace_id = "2101"
-simple = { limit = 100, period = 60 }
+simple = { limit = 600, period = 60 }
 
 # every socket and new code per address, checked in the Worker before a room is woken (safety round 3 sweep):
 # far above a real class on one network, reconnects included

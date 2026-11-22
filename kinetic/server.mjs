@@ -11,7 +11,7 @@
 // (/ronda), so this sees /api/new and /ws/<code>, and passes the visitor's address in x-forwarded-for.
 import http from "node:http";
 import { webcrypto, createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync, renameSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync, renameSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { WebSocketServer } from "ws";
 
@@ -154,7 +154,7 @@ if (!resumeKey) try { resumeKey = readFileSync(join(DATA, "resume-key"), "utf8")
 if (!resumeKey) console.log("no resume key: games can't move here from the other server");
 // the game host's copy of Cloudflare's JOINS limit (100 per address per minute); JOIN_LIMIT only for tests
 const joins = new Map();
-const JOIN_LIMIT = Number(process.env.JOIN_LIMIT) || 100;
+const JOIN_LIMIT = Number(process.env.JOIN_LIMIT) || 600; // the Worker's JOINS (wrangler.toml: a hall of 500, audit R2-7)
 setInterval(() => joins.clear(), 60000).unref();
 const ENV = {
   RESUME_KEY: resumeKey,
@@ -226,7 +226,8 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(503, { "content-type": "application/json", ...cors });
       return res.end(JSON.stringify({ error: "busy" }));
     }
-    const ip = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "?").split(",")[0].trim();
+    // counted under the same keyed one-way code as everything else, never the address itself (audit R2-13)
+    const ip = await ipKey(String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "?").split(",")[0].trim(), resumeKey);
     const n = (starts.get(ip) || 0) + 1;
     starts.set(ip, n);
     if (n > NEW_PER_MINUTE) {
@@ -244,22 +245,36 @@ const server = http.createServer(async (req, res) => {
 
 const MAX_PER_ROOM = 550; // the same as the Worker's MAX_SOCKETS
 const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MSG });
-server.on("upgrade", (req, socket, head) => {
+// sockets open per address (second-pass audit R2-4: one address could hold all MAX_SOCKETS, right where games go
+// when Cloudflare is out); a hall of MAX_PER_ROOM behind one school address still fits
+const PER_ADDRESS = MAX_PER_ROOM + 50;
+const perIp = new Map();
+// a socket whose sends pile up (it stopped reading) is closed past this (R2-4)
+const MAX_BUFFERED = 4 * 1024 * 1024;
+server.on("upgrade", async (req, socket, head) => {
   const m = (req.url || "").split("?")[0].match(/^\/ws\/(\d{6})$/);
   if (!m || sockets >= MAX_SOCKETS) return socket.destroy();
+  const ip = await ipKey(String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "?").split(",")[0].trim(), resumeKey);
+  if ((perIp.get(ip) || 0) >= PER_ADDRESS) return socket.destroy();
+  // a code with nothing in memory or on disk opens a new room file only while there is room for one (R2-2)
+  if (!rooms.has(m[1]) && disk.size >= MAX_FILES && !existsSync(fileOf(m[1]))) return socket.destroy();
+  perIp.set(ip, (perIp.get(ip) || 0) + 1);
   wss.handleUpgrade(req, socket, head, (ws) => {
     const r = roomOf(m[1]);
-    if (r.state.sockets.size >= MAX_PER_ROOM) return ws.close(1013, "full");
+    const gone = () => (perIp.get(ip) > 1 ? perIp.set(ip, perIp.get(ip) - 1) : perIp.delete(ip));
+    if (r.state.sockets.size >= MAX_PER_ROOM) return gone(), ws.close(1013, "full");
     sockets++;
     let att = null;
     ws.serializeAttachment = (v) => (att = clone(v));
     ws.deserializeAttachment = () => clone(att);
-    const ip = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "?").split(",")[0].trim();
-    r.state.acceptWebSocket(ws, [m[1], "ip:none"]);
+    const send = ws.send.bind(ws);
+    ws.send = (d) => (ws.bufferedAmount > MAX_BUFFERED ? ws.terminate() : send(d));
+    r.state.acceptWebSocket(ws, [m[1], ip]);
     idleClose(ws);
-    ipKey(ip).then((k) => (ws.tags[1] = k));
+    ws.once("close", gone);
     ws.on("message", (data, binary) => {
-      if (binary) return;
+      // our pages send no binary: such a frame closes the socket (audit R2-3: they were ignored without a count)
+      if (binary) return void ws.close(1003, "text only");
       run(r, () => r.room.webSocketMessage(ws, data.toString()));
     });
     ws.on("close", () => {

@@ -26,6 +26,9 @@ export async function lookupOk(env, ws) {
   try { return (await env.JOINS.limit({ key: ws.__ip || "" })).success; } catch (_) { return false; }
 }
 const MAX_MSG = 256 * 1024; // a whole quiz arrives in one message
+const SAVE_MS = 5000; // writes outside phase changes are gathered for this long (audit R2-3)
+const HEAVY = new Set(["export", "host", "load", "resume"]);
+const HEAVY_PER_MINUTE = 10;
 const ROOM_TTL = 6 * 3600 * 1000;
 const KINDS = ["quiz", "poll", "words", "scale", "type", "order", "slider"];
 const MAX_ANSWERS = 6;
@@ -104,7 +107,9 @@ export function cleanQa(x, players) {
     seen.add(id);
     let st = QA_ST.includes(it.st) ? it.st : "";
     if (st === "hi") (hi ? (st = "") : (hi = true));
-    const up = [...new Set((Array.isArray(it.up) ? it.up : []).map(String))].filter((p) => players[p]);
+    // who voted never comes from a host's copy: votes come back only as the opaque tokens in v (second-pass audit
+    // R2-5: a copy naming a voter let a changed page test, by the count, whether that person had voted)
+    const up = [];
     const carry = [...new Set((Array.isArray(it.v) ? it.v : []).map(String))].filter((v) => /^[a-z0-9]{12}$/.test(v)).slice(0, MAX_PLAYERS);
     const base = Math.max(0, Math.min(MAX_PLAYERS, Math.trunc(Number(it.n)) || 0) - up.length - carry.length);
     qa.list.push({ id, by: players[it.by] ? String(it.by) : "", name: cleanName(it.name, 30), text,
@@ -165,7 +170,7 @@ export default {
     if (m || (url.pathname === "/api/new" && req.method === "POST")) {
       if (!env.WAKES) return Response.json({ error: "limits missing" }, { status: 503, headers: { ...CORS, "Retry-After": "300" } });
       let ok = false;
-      try { ok = (await env.WAKES.limit({ key: await ipKey(req.headers.get("CF-Connecting-IP")) })).success; } catch (_) {}
+      try { ok = (await env.WAKES.limit({ key: await ipKey(req.headers.get("CF-Connecting-IP"), env.RESUME_KEY) })).success; } catch (_) {}
       if (!ok) return Response.json({ error: "slow" }, { status: 429, headers: CORS });
     }
     if (url.pathname === "/api/new" && req.method === "POST") return newRoom(env);
@@ -173,7 +178,7 @@ export default {
       if (req.headers.get("Upgrade") !== "websocket") return new Response("expected a websocket", { status: 426 });
       const h = new Headers(req.headers);
       h.set("x-room", m[1]);
-      h.set("x-ip-key", await ipKey(req.headers.get("CF-Connecting-IP")));
+      h.set("x-ip-key", await ipKey(req.headers.get("CF-Connecting-IP"), env.RESUME_KEY));
       return env.ROOMS.get(env.ROOMS.idFromName(m[1])).fetch(new Request(req, { headers: h }));
     }
     if (url.pathname === "/health") return new Response("ok");
@@ -192,9 +197,23 @@ const ALPH = "abcdefghijkmnpqrstuvwxyz23456789";
 const enc = (s) => new TextEncoder().encode(s);
 
 // Only a hash of the address is kept (never the address), and only for that day: for the limits.
-export async function ipKey(ip) {
+// One home line is one address: an IPv6 address counts by its /64 (a home gets billions of them), an IPv4 one as
+// itself (second-pass audit R2-3; the same function as Juntos). Only a keyed one-way code of it is kept, made with
+// the servers' secret so whoever holds a count can't try every address (R2-13), and it changes every day.
+export function netOf(ip) {
+  ip = String(ip || "unknown").trim().replace(/^::ffff:(?=\d+\.)/i, "");
+  if (!ip.includes(":")) return ip;
+  const [a, b = ""] = ip.split("%")[0].split("::");
+  const head = a ? a.split(":") : [], tail = b ? b.split(":") : [];
+  const all = ip.includes("::") ? [...head, ...Array(Math.max(0, 8 - head.length - tail.length)).fill("0"), ...tail] : head;
+  return all.slice(0, 4).map((x) => (parseInt(x, 16) || 0).toString(16)).join(":") + "::/64";
+}
+export async function ipKey(ip, secret) {
   const day = new Date().toISOString().slice(0, 10);
-  const h = await crypto.subtle.digest("SHA-256", enc(day + "|ronda|" + (ip || "unknown")));
+  const text = enc(day + "|ronda|" + netOf(ip));
+  const h = secret
+    ? await crypto.subtle.sign("HMAC", await crypto.subtle.importKey("raw", enc("ip|" + secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]), text)
+    : await crypto.subtle.digest("SHA-256", text);
   return "ip:" + [...new Uint8Array(h).slice(0, 8)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
@@ -213,6 +232,10 @@ export function idleClose(ws) {
     if (!(ws.deserializeAttachment() || {}).role) try { ws.close(1008, "no join"); } catch (_) {}
   }, JOIN_MS);
 }
+// A player named in a host's message: only an own entry with a player id's shape (second-pass audit R2-1: the name
+// "__proto__" reached the shared object behind every room's players and marked everyone everywhere as removed)
+const playerOf = (g, id) => (typeof id === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(id) && Object.hasOwn(g.players, id) ? g.players[id] : undefined);
+
 // each socket's message budget; over it, the socket is closed
 export function overBudget(room, ws) {
   const b = (room.budget ||= new Map());
@@ -237,8 +260,14 @@ export async function handleOf(code, raw) {
   const h = new Uint8Array(await crypto.subtle.digest("SHA-256", enc("ronda-player|" + code + "|" + raw)));
   return [...h.slice(0, 16)].map((b) => ALPH[b % 32]).join("");
 }
+// The token's first 6 characters are the minute it was made (in the token alphabet), signed with the rest, so a
+// server can tell its age (second-pass audit R2-2: tokens never got old, and anyone could collect them from /api/new)
+const TA = "abcdefghijkmnpqrstuvwxyz23456789";
+const minuteTag = (m) => Array.from({ length: 6 }, (_, i) => TA[Math.floor(m / 32 ** (5 - i)) % 32]).join("");
+export const tokenMinute = (token) => [...String(token).slice(0, 6)].reduce((n, ch) => n * 32 + Math.max(0, TA.indexOf(ch)), 0);
+const TOKEN_DAY = 24 * 60; // minutes an empty room takes a token for (a live game is gone 6 hours after its last use)
 export async function hostToken(env, code) {
-  const rand = randomToken(12);
+  const rand = minuteTag(Math.floor(Date.now() / 60000)) + randomToken(6);
   const s = await sig(env, code, rand);
   return s ? rand + s : randomToken(24);
 }
@@ -285,7 +314,8 @@ export function cleanSnap(s, host) {
   const players = {};
   for (const p of (Array.isArray(s.players) ? s.players : []).slice(0, MAX_PLAYERS)) {
     const id = String(p?.id || "");
-    if (!/^[A-Za-z0-9_-]{8,40}$/.test(id) || players[id]) continue;
+    // (own entries only: an id like "__proto__" or "constructor" is never a player, R2-1)
+    if (!/^[A-Za-z0-9_-]{8,40}$/.test(id) || id in Object.prototype || Object.hasOwn(players, id)) continue;
     players[id] = { name: cleanName(p.name, 30) || "Player", score: Math.max(0, Math.min(1e7, Math.trunc(Number(p.score)) || 0)) };
     const streak = Math.max(0, Math.min(1000, Math.trunc(Number(p.streak)) || 0));
     if (streak) players[id].streak = streak;
@@ -304,7 +334,7 @@ export function cleanSnap(s, host) {
     const kind = quiz.questions[i].kind;
     const row = {};
     for (const [id, v] of Object.entries(q)) {
-      if (!players[id]) continue;
+      if (!Object.hasOwn(players, id)) continue;
       if (kind === "words") {
         if (Array.isArray(v)) row[id] = v.slice(0, 3).map((w) => str(w, 40).toLowerCase()).filter(Boolean);
       } else if (kind === "type") {
@@ -321,6 +351,8 @@ export function cleanSnap(s, host) {
   const g = { host, phase, quiz, qi, players, ans: {}, log, touched: Date.now(), boardShown: phase === "board" || !!s.boardShown,
     qa: cleanQa(s.qa, players) };
   if (teams) g.teams = teams;
+  // the lock travels with the game (second-pass audit R2-6: a locked room was open again after a move)
+  if (s.locked) g.locked = true;
   if (phase === "question") {
     // the question starts again: the answers given to it were on the server that went away
     const q = quiz.questions[qi];
@@ -336,7 +368,9 @@ export function cleanSnap(s, host) {
 }
 
 // ---- quiz validation: the host's device sends the quiz; keep only what the game uses, bounded ----
-const str = (v, n) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, n);
+// Everything people type that others see is cleaned like a name (second-pass audit R2-9: words, typed answers and
+// audience questions could be made to read backwards on the big screen, or repeat a word with hidden characters)
+const str = (v, n) => cleanName(v, n);
 // A name as others see it (audit R17): no control characters, no marks that flip the text's direction or hide in
 // it (so "Ana" can't be made to look like someone else), spaces folded. The joiner inside an emoji (a family, a
 // rainbow flag) stays. Same rule in Ronda, Juntos and Sumate.
@@ -431,18 +465,29 @@ export class Room {
     return this.g;
   }
 
+  // Phase changes are written at once; everything else (votes, answers, names) at most every SAVE_MS, so one busy
+  // room can't use up the day's writes (second-pass audit R2-3). A write that fails (the day's writes used up) tells
+  // the host's screen, which moves the game to the other server, instead of the game hanging.
   async save(now = false) {
     if (!this.g) return;
     this.g.touched = Date.now();
     if (now) {
       clearTimeout(this.flushTimer);
       this.flushTimer = null;
-      await this.state.storage.put("g", this.g);
+      await this.put();
     } else if (!this.flushTimer) {
       this.flushTimer = setTimeout(() => {
         this.flushTimer = null;
-        this.state.storage.put("g", this.g);
-      }, 800);
+        this.put();
+      }, SAVE_MS);
+    }
+  }
+
+  async put() {
+    try {
+      await this.state.storage.put("g", this.g);
+    } catch (_) {
+      for (const s of this.sockets("host")) this.send(s, { t: "savefail" });
     }
   }
 
@@ -502,20 +547,35 @@ export class Room {
   }
 
   async webSocketMessage(ws, raw) {
-    if (typeof raw !== "string" || raw.length > MAX_MSG) return;
+    // every frame counts first, whatever it is (second-pass audit R2-3: binary and over-long frames were never
+    // counted, so one phone could send without limit); our pages send no binary, so a binary frame closes the socket
     if (overBudget(this, ws)) return;
+    if (typeof raw !== "string") {
+      try { ws.close(1003, "text only"); } catch (_) {}
+      return;
+    }
+    if (raw.length > MAX_MSG) return this.send(ws, { t: "big" });
     let msg;
     try {
       msg = JSON.parse(raw);
     } catch (_) {
       return;
     }
+    // the messages that send back a whole game: a few a minute per socket (audit R2-4)
+    if (HEAVY.has(msg.t)) {
+      const h = (this.heavy ||= new Map());
+      let x = h.get(ws);
+      if (!x || Date.now() - x.t > 60000) h.set(ws, (x = { t: Date.now(), n: 0 }));
+      if (++x.n > HEAVY_PER_MINUTE) return;
+    }
     let g = await this.game();
     ws.__ip = this.state.getTags(ws)[1] || "ip:none";
     // the host's screen brings the game over from the other server (or back after this one lost it)
     if (msg.t === "resume") {
       if (g && !same(msg.token, g.host)) return this.send(ws, { t: "denied" });
-      if (!g && !(await proven(this.env, this.state.getTags(ws)[0], msg.token))) return this.send(ws, { t: "denied" });
+      // an empty room takes a token made in the last day only (R2-2)
+      const age = Math.floor(Date.now() / 60000) - tokenMinute(msg.token);
+      if (!g && (age < -5 || age > TOKEN_DAY || !(await proven(this.env, this.state.getTags(ws)[0], msg.token)))) return this.send(ws, { t: "denied" });
       const snap = cleanSnap(msg.snap, String(msg.token || ""));
       if (!snap || !/^[a-z0-9]{24}$/.test(snap.host)) return this.send(ws, { t: "bad-quiz" });
       for (const s of this.state.getWebSockets()) if (s !== ws && (s.deserializeAttachment() || {}).role === "host") s.close(1000, "moved");
@@ -528,10 +588,12 @@ export class Room {
     }
     const me = ws.deserializeAttachment() || {};
     const lookup = msg.t === "join" || msg.t === "host" || msg.t === "moved";
+    // nothing here: the answer, then the socket is closed (audit R2-3: no 10-second timer per made-up code)
+    // (other messages get no answer, as on a code in use, so the two can't be told apart)
     if (!g) {
-      if (!lookup) return;
-      if (!(await lookupOk(this.env, ws))) return this.send(ws, { t: "slow" });
-      return this.send(ws, { t: "gone" });
+      if (lookup) this.send(ws, { t: (await lookupOk(this.env, ws)) ? "gone" : "slow" });
+      try { ws.close(1000, "gone"); } catch (_) {}
+      return;
     }
     // the game went on on the other server: whoever is still here follows it
     if (msg.t === "moved") {
@@ -549,7 +611,9 @@ export class Room {
     }
     if (msg.t === "join") {
       const raw = String(msg.id || "");
-      if (!/^[A-Za-z0-9_-]{8,40}$/.test(raw)) return;
+      // a badly shaped id gets the same answer as a code nobody uses, after the same count (second-pass audit R2-8:
+      // silence here told a stranger the code held something)
+      if (!/^[A-Za-z0-9_-]{8,40}$/.test(raw)) return this.send(ws, { t: (await lookupOk(this.env, ws)) ? "gone" : "slow" });
       // players are kept under a one-way hash of their secret id and this room's code: hosts, reports and exports
       // see only that, which can't be turned back into the id that joins as them
       const id = await handleOf(this.state.getTags(ws)[0], raw);
@@ -568,7 +632,7 @@ export class Room {
         const taken = new Set(Object.values(g.players).map((x) => x.name.toLowerCase()));
         let name = base;
         for (let k = 2; taken.has(name.toLowerCase()); k++) name = `${base} ${k}`;
-        p = g.players[id] = { name, score: 0 };
+        p = g.players[id] = { name, score: 0, at: Date.now() }; // (at: for "remove everyone who joined in the last minute")
         if (g.teams) p.team = smallestTeam(g.players, g.teams.names.length);
         if (g.self) Object.assign(p, { ph: "intro", qi: -1, ans: [], at: 0 });
         await this.save();
@@ -640,7 +704,7 @@ export class Room {
       return this.everyone();
     }
     if (msg.t === "move" && g.teams && g.phase === "lobby") {
-      const p = g.players[String(msg.id)], k = Number(msg.team);
+      const p = playerOf(g, msg.id), k = Number(msg.team);
       if (!p || p.out || !Number.isInteger(k) || k < 0 || k >= g.teams.names.length) return;
       p.team = k;
       await this.save();
@@ -649,15 +713,14 @@ export class Room {
     if (msg.t === "next") return this.next();
     if (msg.t === "reveal" && g.phase === "question") return this.reveal();
     if (msg.t === "remove") {
-      const p = g.players[String(msg.id)];
+      const p = playerOf(g, msg.id);
       if (!p) return;
-      p.out = true;
-      await this.save();
-      for (const s of this.sockets("player")) if (s.deserializeAttachment().id === msg.id) {
-        this.send(s, { t: "removed" });
-        s.close(1000, "removed");
-      }
-      return this.hostsUpdate();
+      return this.removeAll([msg.id]);
+    }
+    // everyone who joined in the last minute, at once (audit R2-7: a script's made-up names were one tap pair each)
+    if (msg.t === "remove-recent") {
+      const since = Date.now() - 60000;
+      return this.removeAll(Object.keys(g.players).filter((id) => !g.players[id].out && (g.players[id].at || 0) >= since));
     }
     if (msg.t === "export") return this.send(ws, { t: "export", log: g.log, players: g.players, quiz: g.quiz, teams: g.teams || null });
     if (msg.t === "qa") return this.qaAct(msg);
@@ -808,9 +871,10 @@ export class Room {
       for (const v of vals) counts[v - 1]++;
       return { counts, avg: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null };
     }
-    const words = {};
-    for (const list of vals) for (const w of list) words[w] = (words[w] || 0) + 1;
-    return { words: Object.entries(words).sort((a, b) => b[1] - a[1]).slice(0, 80) };
+    // (a Map: a word like "constructor" is a word, not a property of every object, R2-9)
+    const words = new Map();
+    for (const list of vals) for (const w of list) words.set(w, (words.get(w) || 0) + 1);
+    return { words: [...words].sort((a, b) => b[1] - a[1]).slice(0, 80) };
   }
 
   // ---- audience questions ----
@@ -881,7 +945,8 @@ export class Room {
     const { open, mod, list } = this.g.qa;
     // an anonymous question doesn't tell the host who asked
     return { t: "qa", open, mod, list: list.map((x) => ({ id: x.id, by: x.name ? x.by : "", name: x.name, text: x.text, at: x.at, st: x.st, n: votes(x),
-      v: [...x.up.map((id) => x.tk?.[id]).filter(Boolean), ...(x.carry || [])] })) };
+      // (sorted: the order says nothing about who is here or who voted first)
+      v: [...x.up.map((id) => x.tk?.[id]).filter(Boolean), ...(x.carry || [])].sort() })) };
   }
 
   playerQa(id) {
@@ -1114,7 +1179,8 @@ export class Room {
       quiz: g.quiz,
       locked: !!g.locked,
       qi: g.qi,
-      players: this.ranking(),
+      // (recent: joined in the last minute, for the host's "remove everyone who joined in the last minute")
+      players: this.ranking().map((p) => ((g.players[p.id].at || 0) >= Date.now() - 60000 ? { ...p, recent: true } : p)),
       teams: g.teams ? { names: g.teams.names, talk: g.teams.talk, score: g.teams.score } : null,
       teamRank: this.teamRanking(),
       out: Object.keys(g.players).filter((id) => g.players[id].out), // the host's copy of the game keeps these
@@ -1138,6 +1204,32 @@ export class Room {
   }
 
   // the quiz goes to each host screen once (it can be 256 KB); later updates say "same quiz"
+  // Sends these players out. What they wrote for the big screen goes with them: words, typed answers, audience
+  // questions (second-pass audit R2-7: removing someone left their words up). Choices and points stay for the results.
+  async removeAll(ids) {
+    const g = this.g;
+    if (!g || !ids.length) return;
+    const shown = (i) => ["words", "type"].includes(g.quiz?.questions?.[i]?.kind);
+    const out = new Set(ids);
+    for (const id of ids) {
+      const p = playerOf(g, id);
+      if (!p) continue;
+      p.out = true;
+      for (let i = 0; i < g.log.length; i++) if (g.log[i] && shown(i) && Object.hasOwn(g.log[i], id)) delete g.log[i][id];
+      if (g.qi >= 0 && shown(g.qi) && Object.hasOwn(g.ans, id)) delete g.ans[id];
+    }
+    const qaBefore = g.qa.list.length;
+    g.qa.list = g.qa.list.filter((x) => !out.has(x.by));
+    await this.save();
+    for (const s of this.sockets("player")) if (out.has(s.deserializeAttachment().id)) {
+      this.send(s, { t: "removed" });
+      s.close(1000, "removed");
+    }
+    if (g.qa.list.length !== qaBefore) this.qaUpdate(true);
+    if (g.phase === "reveal" || g.phase === "question") this.everyone();
+    return this.hostsUpdate();
+  }
+
   hostsUpdate() {
     if (this.g.self) {
       const v = this.report();

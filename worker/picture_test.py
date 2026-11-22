@@ -14,7 +14,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 from PIL import Image
 from playwright.sync_api import sync_playwright
 
-SITE = sys.argv[1] if len(sys.argv) > 1 else "https://quiz.jurisgames.com"
+SITE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8788"  # the local test server (npx wrangler dev -c wrangler.test.toml --port 8788); the live site only when named
 errors = []
 
 

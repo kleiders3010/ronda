@@ -29,7 +29,7 @@ their phone with a short code. No account, no player limit, nothing to install, 
 - **Assign** (like Kahoot's assignments): no big screen; everyone plays the whole ronda on their own phone, at their own
   pace, until a deadline you pick (up to 28 days ahead; a week to begin with). Send the link, the QR code or the code.
   Each phone shows the questions and answers (in a different order on each phone unless you turn that off), with each
-  question's own timer and points, right or wrong at once, and at the end the place, the right answers and the top 5.
+  question's own timer and points, right or wrong at once, and at the end the place and the right answers (and the top 5, if the host turns that on).
   Someone who leaves comes back where they were (the clock keeps going). The report, on the device that made it (listed
   on the start page), shows who started, who finished, right answers, points and each question; move the deadline, end
   it now, remove someone, download the results. After the deadline nobody new can start; it is deleted 30 days later.

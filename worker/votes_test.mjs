@@ -57,6 +57,11 @@ const moved = cleanQa({ open: true, list: [{ id: "abcdef12", text: "Slides?", n:
 const ids = cleanQa({ open: true, list: [{ id: "abcdef12", text: "Slides?", n: 3, up: ["x"] }] }, { x: { name: "X" } });
 check(moved.list[0].base === 3 && moved.list[0].up.length === 0, "a moved game keeps the count (3)");
 check(ids.list[0].base + ids.list[0].up.length === 3, "an older copy with ids still counts right");
+// second-pass audit R2-5: a copy that names a voter is not taken (the count stays, nobody is listed), so a changed
+// page can't learn by the count who voted when that person's phone comes back
+check(ids.list[0].up.length === 0 && ids.list[0].base === 3, "a copy naming a voter lists nobody, the count stays");
+const toks = last(host, "qa")?.list?.find((x) => x.id === qid)?.v || [];
+check(JSON.stringify(toks) === JSON.stringify([...toks].sort()), "the vote tokens go to the host sorted");
 
 for (const w of [host, ana, beto]) w.close();
 srv.kill();
