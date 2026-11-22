@@ -305,6 +305,8 @@ const DICT = {
     "See your result": "Ver tu resultado",
     "The time to answer is over": "Se terminó el tiempo para responder",
     "{r} of {n} right · {p} points": "{r} de {n} bien · {p} puntos",
+    "No connection. Ronda needs the internet to play.": "Sin conexión. Ronda necesita internet para jugar.",
+    "Try again": "Reintentar",
   },
 };
 

@@ -383,3 +383,7 @@ div.typed .chip.ok { outline: 2px solid #86efac; }
 .rAns { margin: 4px 0 0; padding-left: 18px; font-size: 15px; color: var(--muted); }
 .rAns li.ok { color: #15803d; font-weight: 600; }
 .rAns li.ok::after { content: " ✓"; }
+
+/* the page shown with no connection (sw.js) */
+.offlinePage { max-width: 420px; margin: 18vh auto 0; padding: 24px; text-align: center; display: grid; gap: 14px; justify-items: center; }
+.offlinePage h1 { margin: 0; }

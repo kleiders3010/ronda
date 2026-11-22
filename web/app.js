@@ -57,7 +57,8 @@ const randId = (n = 16) => [...crypto.getRandomValues(new Uint8Array(n))].map((b
 function toast(text, ms = 3200) {
   const d = el("div", "toast", text);
   $("#toasts").append(d);
-  setTimeout(() => d.remove(), ms);
+  // long enough to read: at least 5 s, more for long text (Juntos UX review U-J7)
+  setTimeout(() => d.remove(), Math.max(ms, 5000, String(text).length * 70));
 }
 
 // every key starts with "ronda." (audit R11: the GitHub Pages copy shares its storage with our other apps)
@@ -2229,3 +2230,6 @@ function drawAssigned() {
 // ---------------- start ----------------
 translatePage();
 route();
+
+// the offline page (sw.js): opening the app with no connection shows ours, not the browser's error page
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
