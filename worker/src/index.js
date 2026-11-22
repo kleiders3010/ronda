@@ -17,8 +17,9 @@ const JOIN_MS = 10000; // a socket that has not joined or hosted by then is clos
 // New joins and failed lookups per address per minute (wrangler.toml JOINS; APP-RULES safety 5): codes can't be
 // tried by the thousand. Rejoins and hosts with their token don't count.
 export async function lookupOk(env, ws) {
-  if (!env || !env.JOINS) return true;
-  try { return (await env.JOINS.limit({ key: ws.__ip || "" })).success; } catch (_) { return true; }
+  // fails closed (safety round 5, S10): no limiter, or one that errors, means no lookup; the game host passes its own
+  if (!env || !env.JOINS) return false;
+  try { return (await env.JOINS.limit({ key: ws.__ip || "" })).success; } catch (_) { return false; }
 }
 const MAX_MSG = 256 * 1024; // a whole quiz arrives in one message
 const ROOM_TTL = 6 * 3600 * 1000;
@@ -156,8 +157,10 @@ export default {
     // every socket and new code per address, before any room is woken (safety round 3 sweep, APP-RULES safety 39):
     // wrangler.toml WAKES, far above a real class on one network (rejoins included); JOINS inside the room still
     // counts new joins and failed lookups only
-    if ((m || (url.pathname === "/api/new" && req.method === "POST")) && env.WAKES) {
-      let ok = true;
+    // fails closed (safety round 5, S10); only Cloudflare runs this handler (the game host counts in kinetic/server.mjs)
+    if (m || (url.pathname === "/api/new" && req.method === "POST")) {
+      if (!env.WAKES) return Response.json({ error: "limits missing" }, { status: 503, headers: { ...CORS, "Retry-After": "300" } });
+      let ok = false;
       try { ok = (await env.WAKES.limit({ key: await ipKey(req.headers.get("CF-Connecting-IP")) })).success; } catch (_) {}
       if (!ok) return Response.json({ error: "slow" }, { status: 429, headers: CORS });
     }
