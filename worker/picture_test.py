@@ -43,7 +43,7 @@ IN_VIEW = """(sel) => [...document.querySelectorAll(sel)].map(e => { const r = e
   return r.top >= 0 && r.bottom <= innerHeight + 1 && r.left >= 0 && r.right <= innerWidth + 1; })"""
 
 with sync_playwright() as p:
-    b = p.chromium.launch(headless=True, channel="msedge")
+    b = p.chromium.launch(headless=True, channel="msedge", args=["--disable-gpu"])
 
     def page(w, h):
         pg = b.new_context(locale="en-US", viewport={"width": w, "height": h}, accept_downloads=True).new_page()

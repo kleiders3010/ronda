@@ -72,7 +72,7 @@ if u:
     check(u["snap"] == {"aaaaaaaa": 1969}, f"answers move to the other server with the game, out-of-range ones don't ({u['snap']})")
 
 with sync_playwright() as p:
-    b = p.chromium.launch(headless=True, channel="msedge")
+    b = p.chromium.launch(headless=True, channel="msedge", args=["--disable-gpu"])
 
     def page(phone=False):
         pg = b.new_context(locale="en-US", accept_downloads=True,

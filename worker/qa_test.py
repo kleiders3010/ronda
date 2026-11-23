@@ -35,7 +35,7 @@ def items(pg, ul):
 
 
 with sync_playwright() as p:
-    b = p.chromium.launch(headless=True, channel="msedge")
+    b = p.chromium.launch(headless=True, channel="msedge", args=["--disable-gpu"])
 
     def page(vp=None):
         pg = b.new_context(locale="en-US", accept_downloads=True, **({"viewport": vp} if vp else {})).new_page()

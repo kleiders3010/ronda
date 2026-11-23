@@ -56,7 +56,7 @@ if u:
     check(u["live"] == 6 * 3600000 and u["self"] == 30 * DAY, "a live game goes 6 h after the last activity, an assignment 30 days after its deadline")  # pinned: privacy page
 
 with sync_playwright() as p:
-    b = p.chromium.launch(headless=True, channel="msedge")
+    b = p.chromium.launch(headless=True, channel="msedge", args=["--disable-gpu"])
 
     def ctx(phone=False):
         return b.new_context(locale="en-US", accept_downloads=True,

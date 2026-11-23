@@ -44,7 +44,7 @@ REACH = """(sel) => [...document.querySelectorAll(sel)].map(e => { e.scrollIntoV
   return !!hit && (hit === e || e.contains(hit)); })"""
 
 with sync_playwright() as p:
-    b = p.chromium.launch(headless=True, channel="msedge")
+    b = p.chromium.launch(headless=True, channel="msedge", args=["--disable-gpu"])
 
     def page(w, h):
         pg = b.new_context(locale="en-US", viewport={"width": w, "height": h}).new_page()

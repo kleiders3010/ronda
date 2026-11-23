@@ -70,7 +70,7 @@ if u:
     check(u["noTeams"] is None, "no teams: nobody carries one")
 
 with sync_playwright() as p:
-    b = p.chromium.launch(headless=True, channel="msedge")
+    b = p.chromium.launch(headless=True, channel="msedge", args=["--disable-gpu"])
 
     def page(phone=False):
         pg = b.new_context(locale="en-US", accept_downloads=True,

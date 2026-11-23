@@ -40,7 +40,7 @@ def score(pg):
 
 
 with sync_playwright() as p:
-    b = p.chromium.launch(headless=True, channel="msedge")
+    b = p.chromium.launch(headless=True, channel="msedge", args=["--disable-gpu"])
 
     def page(phone=False):
         pg = b.new_context(locale="en-US", viewport={"width": 390, "height": 760} if phone else {"width": 1280, "height": 720}).new_page()

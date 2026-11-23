@@ -23,7 +23,7 @@ ODD = {"title": 12345, "questions": [None, "text", {"kind": "quiz", "text": {"x"
                                      {"kind": "slider", "text": "How far?", "min": "a", "max": 10, "ans": 5}]}
 
 with sync_playwright() as p:
-    b = p.chromium.launch()
+    b = p.chromium.launch(args=["--disable-gpu"])
     page = b.new_page()
     page_errors = []
     page.on("pageerror", lambda e: page_errors.append(str(e)))
