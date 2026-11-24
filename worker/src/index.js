@@ -9,6 +9,9 @@
 // ("resume", from the copy it keeps) and players follow.
 
 const MAX_PLAYERS = 500;
+// rooms bigger than this send the host's view after answers at most once per HOSTS_MS (soonHosts)
+const BIG_ROOM = 60;
+const HOSTS_MS = 300;
 // limits (APP-RULES safety 5), far above what a real game does: a phone sends a message when someone presses
 const BUDGET_MS = 10000;
 const BUDGET = { player: 40, host: 300, none: 10 }; // messages per socket per 10 s, then it is closed
@@ -542,8 +545,20 @@ export class Room {
     this.send(ws, { t: "gone" });
   }
 
+  // a socket's role and id, read once: deserializeAttachment makes a copy on every call, and an answer in a hall of
+  // 500 read all 500 (item 46 load test 2026-11-23: most of the server's time). Nothing changes the returned object.
+  att(ws) {
+    const m = (this.atts ||= new WeakMap());
+    if (!m.has(ws)) m.set(ws, ws.deserializeAttachment() || {});
+    return m.get(ws);
+  }
+  setAtt(ws, v) {
+    ws.serializeAttachment(v);
+    (this.atts ||= new WeakMap()).set(ws, v);
+  }
+
   sockets(role) {
-    return this.state.getWebSockets().filter((ws) => (ws.deserializeAttachment() || {}).role === role);
+    return this.state.getWebSockets().filter((ws) => this.att(ws).role === role);
   }
 
   async webSocketMessage(ws, raw) {
@@ -578,15 +593,15 @@ export class Room {
       if (!g && (age < -5 || age > TOKEN_DAY || !(await proven(this.env, this.state.getTags(ws)[0], msg.token)))) return this.send(ws, { t: "denied" });
       const snap = cleanSnap(msg.snap, String(msg.token || ""));
       if (!snap || !/^[a-z0-9]{24}$/.test(snap.host)) return this.send(ws, { t: "bad-quiz" });
-      for (const s of this.state.getWebSockets()) if (s !== ws && (s.deserializeAttachment() || {}).role === "host") s.close(1000, "moved");
+      for (const s of this.state.getWebSockets()) if (s !== ws && this.att(s).role === "host") s.close(1000, "moved");
       g = this.g = snap;
-      ws.serializeAttachment({ role: "host" });
+      this.setAtt(ws, { role: "host" });
       await this.save(true);
       await this.plan();
       this.qaSend();
       return this.everyone();
     }
-    const me = ws.deserializeAttachment() || {};
+    const me = this.att(ws);
     const lookup = msg.t === "join" || msg.t === "host" || msg.t === "moved";
     // nothing here: the answer, then the socket is closed (audit R2-3: no 10-second timer per made-up code)
     // (other messages get no answer, as on a code in use, so the two can't be told apart)
@@ -606,7 +621,7 @@ export class Room {
 
     if (msg.t === "host") {
       if (!same(msg.token, g.host)) return this.nope(ws);
-      ws.serializeAttachment({ role: "host" });
+      this.setAtt(ws, { role: "host" });
       return this.toHost(ws);
     }
     if (msg.t === "join") {
@@ -638,7 +653,7 @@ export class Room {
         await this.save();
       }
       if (p.out) return this.send(ws, { t: "removed" });
-      ws.serializeAttachment({ role: "player", id });
+      this.setAtt(ws, { role: "player", id });
       await this.claimVotes(this.state.getTags(ws)[0], id);
       if (g.self) {
         await this.selfCatchUp(id);
@@ -833,10 +848,10 @@ export class Room {
     if (v === undefined) return;
     g.ans[id] = { v, at: Date.now() };
     await this.save();
-    for (const s of this.sockets("player")) if (s.deserializeAttachment().id === id) this.send(s, this.playerView(id));
+    for (const s of this.sockets("player")) if (this.att(s).id === id) this.send(s, this.playerView(id));
     const active = Object.values(g.players).filter((x) => !x.out).length;
     if (q.kind !== "words" && Object.keys(g.ans).length >= active && q.time) return this.reveal();
-    this.hostsUpdate();
+    this.soonHosts();
   }
 
   results() {
@@ -970,7 +985,7 @@ export class Room {
     const h = this.hostQa();
     for (const ws of this.sockets("host")) this.send(ws, h);
     for (const ws of this.sockets("player")) {
-      const id = ws.deserializeAttachment().id;
+      const id = this.att(ws).id;
       if (this.g.players[id] && !this.g.players[id].out) this.send(ws, this.playerQa(id));
     }
   }
@@ -1072,7 +1087,7 @@ export class Room {
     }
     await this.save();
     this.selfSend(id);
-    this.hostsUpdate();
+    this.soonHosts();
   }
 
   async selfAnswer(id, msg) {
@@ -1101,11 +1116,11 @@ export class Room {
     }
     await this.save();
     this.selfSend(id);
-    this.hostsUpdate();
+    this.soonHosts();
   }
 
   selfSend(id) {
-    for (const s of this.sockets("player")) if (s.deserializeAttachment().id === id) this.send(s, this.playerView(id));
+    for (const s of this.sockets("player")) if (this.att(s).id === id) this.send(s, this.playerView(id));
   }
 
   selfView(id) {
@@ -1221,13 +1236,29 @@ export class Room {
     const qaBefore = g.qa.list.length;
     g.qa.list = g.qa.list.filter((x) => !out.has(x.by));
     await this.save();
-    for (const s of this.sockets("player")) if (out.has(s.deserializeAttachment().id)) {
+    for (const s of this.sockets("player")) if (out.has(this.att(s).id)) {
       this.send(s, { t: "removed" });
       s.close(1000, "removed");
     }
     if (g.qa.list.length !== qaBefore) this.qaUpdate(true);
     if (g.phase === "reveal" || g.phase === "question") this.everyone();
     return this.hostsUpdate();
+  }
+
+  // after an answer: in a small room at once (as before); past BIG_ROOM players at most once per HOSTS_MS, the last
+  // one always sent. The host's view lists every player, so one per answer in a hall of 500 was 500 full lists in a
+  // few seconds (item 46 load test 2026-11-23: answers waited a second with four such halls on one server).
+  soonHosts() {
+    if (Object.keys(this.g.players).length <= BIG_ROOM) return this.hostsUpdate();
+    if (this.hostsTimer) return void (this.hostsLate = true);
+    this.hostsUpdate();
+    const tick = () => {
+      if (!this.hostsLate) return void (this.hostsTimer = null);
+      this.hostsLate = false;
+      if (this.g) this.hostsUpdate();
+      this.hostsTimer = setTimeout(tick, HOSTS_MS);
+    };
+    this.hostsTimer = setTimeout(tick, HOSTS_MS);
   }
 
   hostsUpdate() {
@@ -1277,7 +1308,7 @@ export class Room {
   everyone() {
     this.hostsUpdate();
     for (const ws of this.sockets("player")) {
-      const id = ws.deserializeAttachment().id;
+      const id = this.att(ws).id;
       if (this.g.players[id]) this.send(ws, this.playerView(id));
     }
   }
@@ -1285,7 +1316,7 @@ export class Room {
   async webSocketClose(ws) {
     this.budget?.delete(ws);
     this.quizSent?.delete(ws);
-    if ((ws.deserializeAttachment() || {}).role === "player" && (await this.game())) this.hostsUpdate();
+    if (this.att(ws).role === "player" && (await this.game())) this.hostsUpdate();
   }
 }
 
