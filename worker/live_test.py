@@ -1,5 +1,5 @@
-# The live site: a ronda on Cloudflare, people join and play it, and the game host's copy (where games go when
-# Cloudflare can't be reached) answers. Moving a game between servers is worker/failover_test.py (local: it needs
+# The live site: a ronda starts on the game host (item 46: Cloudflare is where games go when the host can't be
+# reached), people join and play it, and the game host's copy answers. Moving a game between servers is worker/failover_test.py (local: it needs
 # to kill them; the live page takes no ?server= switch, APP-RULES safety 103).
 #   python worker/live_test.py [site]
 import sys
@@ -50,12 +50,15 @@ with sync_playwright() as p:
         h.context.close()
         pl.context.close()
 
-    play("", 0, "Cloudflare")
+    # new rondas start on the game host (odd digit sum) since 2026-11-22 (item 46); Cloudflare when it does not answer
+    play("", 1, "Game host")
     # The live page no longer takes ?server= (APP-RULES safety 103), so a Cloudflare outage can't be faked from here:
     # moving to the game host is worker/failover_test.py (local, it kills servers); here only that the game host
     # answers.
     import urllib.request
-    with urllib.request.urlopen("https://games.jurisgames.com/ronda/api/health", timeout=20) as r:
+    # Cloudflare's edge refuses Python's default client name (403, 2026-11-23); a named client passes
+    req = urllib.request.Request("https://games.jurisgames.com/ronda/api/health", headers={"User-Agent": "ronda-live-test"})
+    with urllib.request.urlopen(req, timeout=20) as r:
         check(r.status == 200 and b"ok" in r.read(), "the game host's Ronda copy answers")  # pinned: health answers {"ok": true}
     check(not [e for e in errors if e.startswith("pageerror")], "no page errors")
     b.close()
