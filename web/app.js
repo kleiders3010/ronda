@@ -973,7 +973,16 @@ function connect(code, onOpen, onMsg, { at = homeOf(code), patience = 2 } = {}) 
   };
   const open = () => {
     let opened = false;
-    const sock = (ws = new WebSocket(SERVERS[at] + "/ws/" + code));
+    let sock;
+    // a socket that can't even be made (a browser that refuses the address) retries like a failed one: a throw here
+    // ended the reconnecting for good (found by ux28_test on the live https page, 2026-11-28)
+    try { sock = ws = new WebSocket(SERVERS[at] + "/ws/" + code); } catch {
+      ws = null;
+      down();
+      retryTimer = setTimeout(open, wait);
+      wait = Math.min(wait * 2, 4000);
+      return;
+    }
     const timer = setTimeout(() => { if (!opened) sock.close(); }, 5000);
     sock.onopen = () => {
       opened = ever = true; clearTimeout(timer); clearTimeout(firstWait); clearTimeout(downTimer); downTimer = 0;

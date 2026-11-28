@@ -24,7 +24,10 @@ SOCKS = """
 const W = window.WebSocket;
 window.__socks = [];
 window.__block = false;
-window.WebSocket = function (u, p) { const s = new W(window.__block ? "ws://127.0.0.1:9/down" : u, p); window.__socks.push(s); return s; };
+// (wss on an https page: a ws:// address there throws instead of failing to connect)
+window.WebSocket = function (u, p) {
+  if (window.__block === "throw") throw new DOMException("refused", "SecurityError"); // a browser that refuses the address
+  const s = new W(window.__block ? (location.protocol === "https:" ? "wss" : "ws") + "://127.0.0.1:9/down" : u, p); window.__socks.push(s); return s; };
 window.WebSocket.prototype = W.prototype;
 Object.assign(window.WebSocket, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
 """
@@ -96,7 +99,7 @@ with sync_playwright() as p:
     # U-R1 the player's link drops and stays down; an answer tapped meanwhile arrives once it is back
     # close() alone waits for the server to answer the close (wrangler dev never did): the drop is reported at once,
     # as the browser does when the network goes
-    pl.evaluate("() => { window.__block = true; window.__socks.filter((s) => s.readyState < 2).forEach((s) => { s.close(); s.onclose?.(new CloseEvent('close')); }); }")
+    pl.evaluate("() => { window.__block = 'throw'; window.__socks.filter((s) => s.readyState < 2).forEach((s) => { s.close(); s.onclose?.(new CloseEvent('close')); }); }")
     pl.wait_for_timeout(1800)
     bar = pl.evaluate("() => { const n = document.getElementById('net'); return n && !n.hidden ? n.textContent : ''; }")
     check("Reconnecting" in bar, f"U-R1 a dropped link says so ({bar!r})")
