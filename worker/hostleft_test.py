@@ -90,8 +90,10 @@ with sync_playwright() as p:
     check(links["n"] > before, f"a silent link is found and a new one opened ({before} -> {links['n']} links)")
     h.wait_for_selector("#hNext:not([disabled])", timeout=15000)
     h.click("#hNext")
-    goes_on = soft(pl.wait_for_function, "() => document.getElementById('pMain').textContent.includes('a')", timeout=15000)
-    check(goes_on and pl.locator("#pMain button").count() >= 2, "the game goes on over the new link")
+    # the first question's answer buttons (after its reading time); "a" alone also matched the lobby's "Look at"
+    goes_on = soft(pl.wait_for_function, "() => document.querySelectorAll('#pMain button').length >= 2", timeout=20000)
+    check(goes_on and pl.locator("#pMain button").count() >= 2,
+          f"the game goes on over the new link ({pl.inner_text('#pMain')[:80]!r}, {pl.locator('#pMain button').count()} buttons, {links['n']} links)")
 
     check(not [e for e in errors if e.startswith("pageerror")], "no page errors")
     b.close()
