@@ -108,7 +108,8 @@ with sync_playwright() as p:
     code = h.url.split("/report/")[1][:6]
     check(not h.locator("#asgSheet").count(), f"Create assignment: the report opens ({code})")
     h.wait_for_selector(".rState.on", timeout=15000)
-    check(h.locator(".rCode").inner_text().replace(" ", "") == code and h.locator("#rShare .qr").count() == 1, "it shows the code, the link and a QR code")
+    # an assignment: the link and QR lead, the code is only a small line (UX review U-R24)
+    check(code in h.locator(".rCode").inner_text().replace(" ", "") and h.locator(".rCode.small").count() == 1 and h.locator("#rShare .qr").count() == 1, "it shows the link, a QR code and the code small")
     check("Nobody yet" in h.inner_text("#rMain"), "nobody has started yet")
     LINK = h.locator(".rLink").inner_text().strip()
     check("#k=" in LINK and len(LINK.split("#k=")[1]) == 12, f"the link carries the assignment's key ({LINK.split('#')[0]}#k=...)")  # pinned: safety audit R8

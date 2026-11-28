@@ -329,7 +329,8 @@ div.typed .chip.ok { outline: 2px solid #86efac; }
 .track .dot.ok { background: #86efac; }
 .track .mark { position: absolute; top: -14px; bottom: -14px; width: 6px; margin-left: -3px; border-radius: 3px; background: #fff; left: var(--to); animation: slideIn 1.4s cubic-bezier(.3, 1.4, .5, 1); }
 @keyframes slideIn { from { left: 0; } }
-@media (prefers-reduced-motion: reduce) { .track .mark { animation: none; } }
+/* "Remove animations" on: nothing pops, grows or slides (UX review U-R25) */
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 
 /* teams (like Kahoot's team mode) */
 .tdot { display: inline-block; width: .8em; height: .8em; border-radius: 50%; vertical-align: middle; flex: none; }
@@ -377,6 +378,7 @@ div.typed .chip.ok { outline: 2px solid #86efac; }
 .rShareText { flex: 1 1 220px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .rShareText p { margin: 0; }
 .rCode { font-size: 2.375rem; font-weight: 800; letter-spacing: 2px; }
+.rCode.small { font-size: 0.875rem; font-weight: 600; letter-spacing: 0; } /* an assignment: send the link, not the code (U-R24) */
 .rLink { font-size: 0.875rem; overflow-wrap: anywhere; color: var(--muted); }
 .rShare .qr { width: 140px; height: 140px; border-radius: 8px; }
 .rState { margin: 0; font-weight: 700; }
@@ -418,3 +420,26 @@ div.typed .chip.ok { outline: 2px solid #86efac; }
 .leaveAsk p { flex-basis: 100%; margin: 0; text-align: center; font-weight: 700; }
 .mineRow.running { outline: 2px solid var(--accent); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.fieldMsg { margin: 4px 0 0; font-size: 0.9375rem; }
+/* the editor rows carry 17 px white letters: amber and cyan one step darker there, 5.0:1 and 5.4:1 (UX review U-R29);
+   the phone and big-screen tiles keep the CVD-checked set above (large text, 3:1) */
+.aedit.c1 { --c: #b45309; } .aedit.c2 { --c: #0e7490; }
+/* the system's dark theme on home, editor, report and their sheets (UX review U-R26: the editor at night was bright);
+   the player and the big screen are dark already. Text pairs measured (WCAG): ink #ece9f8 on paper #14112b 15.4:1, muted
+   #b3aed0 on card #211c3d 7.6:1, links #c4b5fd 9.9:1, errors #fca5a5 9.7:1, green #86efac 11.5:1, white on #6d28d9 7.1:1. */
+@media (prefers-color-scheme: dark) {
+  html { color-scheme: dark; }
+  .page.light, .asgSheet {
+    --ink: #ece9f8; --muted: #b3aed0; --paper: #14112b; --card: #211c3d; --line: #3a3360; --link: #c4b5fd;
+    color: var(--ink); background: var(--paper);
+  }
+  html:has(.page.light:not([hidden])), body:has(.page.light:not([hidden])) { background: #14112b; }
+  .page.light a, .page.light .btn.link, .asgSheet a { color: var(--link); }
+  .page.light .btn.primary, .asgSheet .btn.primary { background: #6d28d9; }
+  .page.light .msg, .page.light .danger-text, .page.light .btn.chip.rm, .asgSheet .msg { color: #fca5a5; }
+  .page.light .rState.on, .page.light .rPeople td.ok, .page.light .rAns li.ok { color: #86efac; }
+  .page.light .icon:hover:not(:disabled) { background: #2c2650; }
+  .page.light .efoot { background: rgba(20, 17, 43, .95); }
+  .page.light .qnum { background: #3a3360; }
+  .page.light .mineRow.running { outline-color: #c4b5fd; }
+}

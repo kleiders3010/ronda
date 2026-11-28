@@ -152,6 +152,22 @@ function sheetOpen(sheet, head, { first, onClose } = {}) {
   return api;
 }
 
+// An empty field that stops a tap says so in one line under it, tied to it (UX review U-R23: the tap did nothing)
+function fieldSay(inp, text) {
+  let m = inp.nextElementSibling?.classList.contains("fieldMsg") ? inp.nextElementSibling : null;
+  if (!m) {
+    m = el("p", "fieldMsg msg");
+    m.id = "fm" + randId(4);
+    inp.after(m);
+    inp.addEventListener("input", () => { m.hidden = true; inp.removeAttribute("aria-invalid"); });
+  }
+  m.textContent = text;
+  m.hidden = false;
+  inp.setAttribute("aria-describedby", m.id);
+  inp.setAttribute("aria-invalid", "true");
+  inp.focus();
+}
+
 // ---------------- pages ----------------
 function show(id) {
   for (const s of document.querySelectorAll(".page")) s.hidden = s.id !== id;
@@ -1220,7 +1236,7 @@ function nameScreen(code) {
   $("#nameForm").onsubmit = (e) => {
     e.preventDefault();
     const name = $("#nameInput").value.trim();
-    if (!name) return $("#nameInput").focus();
+    if (!name) return fieldSay($("#nameInput"), t("Type a name so the others know who you are"));
     safeSet("name", name);
     playScreen(code, name, (location.hash.match(/^#k=([a-z0-9]{8,40})$/) || [])[1] || "");
   };
@@ -1334,6 +1350,7 @@ function playScreen(code, name, key = "") {
   live.onView = (m) => { phase = m.phase; };
   live.path = "/" + code;
   live.guard = () => !!phase && phase !== "end";
+  keepAwake(); // the player's phone doesn't sleep during a long explanation (UX review U-R27)
   history.pushState(null, "", location.href);
   function endMsg(text) {
     closeLive();
@@ -1347,7 +1364,7 @@ function playScreen(code, name, key = "") {
     e.preventDefault();
     const f = e.target;
     const text = f.ask.value.trim();
-    if (!text) return f.ask.focus();
+    if (!text) return fieldSay(f.ask, t("Write your question first"));
     live.send({ t: "ask", text, anon: f.anon.checked });
     f.ask.value = "";
     toast(qa?.mod ? t("Sent. The host will see it first.") : t("Sent"));
@@ -1370,7 +1387,7 @@ function playerQa(m) {
   qa = m;
   const open = m.list.filter((x) => x.st !== "done").length;
   $("#pQa").hidden = !m.open && !m.list.length;
-  $("#pQa").textContent = open ? t("Questions ({n})", { n: open }) : t("Questions");
+  $("#pQa").textContent = open ? t("Ask the host ({n})", { n: open }) : t("Ask the host");
   if (!$("#pQaBox").hidden) drawPlayerQa();
 }
 
@@ -1501,7 +1518,7 @@ function playerView(m) {
         f.append(inp, el("button", "btn primary", t("Send")));
         f.onsubmit = (e) => {
           e.preventDefault();
-          if (!inp.value.trim()) return;
+          if (!inp.value.trim()) return fieldSay(inp, t("Type an answer first"));
           for (const x of f.elements) x.disabled = true;
           live.send({ t: "answer", qi: m.qi, v: inp.value });
         };
@@ -1540,7 +1557,7 @@ function playerView(m) {
         inp.placeholder = mine.length ? t("Another word (optional)") : t("Type a word");
         inp.autocomplete = "off";
         f.append(inp, el("button", "btn primary", t("Send")));
-        f.onsubmit = (e) => { e.preventDefault(); if (inp.value.trim()) live.send({ t: "answer", qi: m.qi, v: inp.value }); };
+        f.onsubmit = (e) => { e.preventDefault(); if (inp.value.trim()) live.send({ t: "answer", qi: m.qi, v: inp.value }); else fieldSay(inp, t("Type a word first")); };
         out.push(f);
         setTimeout(() => inp.focus(), 50);
       } else out.push(el("p", "wait", t("Sent.")));
@@ -1687,7 +1704,7 @@ let wakeLock = null;
 async function keepAwake() {
   try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
 }
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && live?.host) keepAwake(); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && live?.path) keepAwake(); });
 
 function hostScreen(code) {
   let saved = null;
@@ -1794,7 +1811,7 @@ function hostScreen(code) {
   $("#hFull").hidden = !document.documentElement.requestFullscreen;
   qa = snap.qa || null;
   $("#hQaPanel").hidden = $("#hQaShow").hidden = true;
-  $("#hQa").textContent = t("Questions");
+  $("#hQa").textContent = t("Audience questions");
   $("#hQa").onclick = () => { $("#hQaPanel").hidden = !$("#hQaPanel").hidden; drawHostQa(); };
   $("#hQaClose").onclick = () => { $("#hQaPanel").hidden = true; };
   $("#qaOpen").onchange = (e) => live.send({ t: "qa", do: e.target.checked ? "open" : "close" });
@@ -1811,7 +1828,7 @@ function hostQa(m) {
   qa = m;
   const waiting = m.list.filter((x) => x.st === "wait").length;
   const open = m.list.filter((x) => x.st !== "done").length;
-  $("#hQa").textContent = waiting ? t("Questions ({n} to approve)", { n: waiting }) : open ? t("Questions ({n})", { n: open }) : t("Questions");
+  $("#hQa").textContent = waiting ? t("Audience questions ({n} to approve)", { n: waiting }) : open ? t("Audience questions ({n})", { n: open }) : t("Audience questions");
   $("#hQa").classList.toggle("ping", waiting > 0);
   const hi = m.list.find((x) => x.st === "hi");
   const show = $("#hQaShow");
@@ -2519,7 +2536,7 @@ function drawShare(code, key) {
   };
   const left = el("div", "rShareText");
   left.append(el("p", "small", key ? t("Send this link: the code alone doesn't open an assignment.") : t("Send the link, or people enter the code at {site}", { site: location.host + BASE.replace(/\/$/, "") })),
-    el("p", "rCode", fmtCode(code)), el("p", "rLink", link), copy);
+    el("p", key ? "rCode small" : "rCode", key ? t("Code {code}", { code: fmtCode(code) }) : fmtCode(code)), el("p", "rLink", link), copy);
   box.replaceChildren(left);
   try { box.append(qr(link)); } catch {}
 }
@@ -2562,7 +2579,7 @@ function drawReport(m) {
     wrap.append(tbl);
     out.push(wrap);
   }
-  out.push(el("h2", "sub", t("Questions")));
+  out.push(el("h2", "sub", t("Audience questions")));
   const ol = el("ol", "rQs");
   qs.forEach((q, i) => {
     const vals = m.people.map((p) => p.ans[i]).filter((v) => v != null);
