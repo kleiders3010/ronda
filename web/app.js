@@ -1128,6 +1128,9 @@ function netShow(text, retry) {
   }
   bar.hidden = false;
 }
+// the heartbeat and the "host's connection dropped" grace; tests make them shorter with ?beat=0.1 (never under 1 s a ping)
+const BEAT_X = Math.max(0.05, Math.min(1, Number(new URLSearchParams(location.search).get("beat")) || 1));
+const PING_MS = 20000 * BEAT_X, PONG_MS = 8000 * BEAT_X, HOST_GRACE_MS = 5000 * BEAT_X;
 function connect(code, onOpen, onMsg, { at = homeOf(code), patience = 2 } = {}) {
   let ws, stopped = false, wait = 500, fails = 0, ever = false, downTimer = 0, retryTimer = 0;
   const queue = []; // [time, message]: sent when the link is back; older than 60 s is dropped
@@ -1165,13 +1168,41 @@ function connect(code, onOpen, onMsg, { at = homeOf(code), patience = 2 } = {}) 
       opened = ever = true; clearTimeout(timer); clearTimeout(firstWait); clearTimeout(downTimer); downTimer = 0;
       wait = 500; fails = 0; LIVE.opens++;
       netShow("");
+      heard = Date.now();
+      pulse();
       onOpen(at);
       const now = Date.now();
       for (const [when, m] of queue.splice(0)) if (now - when < 60000) sock.send(JSON.stringify(m));
     };
-    sock.onmessage = (e) => { if (sock === ws) try { onMsg(JSON.parse(e.data), at); } catch {} };
-    sock.onclose = () => {
+    // heartbeat: a link that looks open but carries nothing (a phone that changed networks, a router that dropped it)
+    // never closes by itself. Every 20 s on screen a "ping"; no word back in 8 s and the link is treated as gone and
+    // reopened, the same way as a close
+    let beat = 0, heard = Date.now();
+    const pulse = () => {
+      clearTimeout(beat);
+      beat = setTimeout(() => {
+        if (stopped || sock !== ws || sock.readyState !== 1) return;
+        if (document.visibilityState === "hidden") return pulse();
+        const asked = Date.now();
+        try { sock.send("ping"); } catch {}
+        beat = setTimeout(() => (heard >= asked ? pulse() : lost()), PONG_MS);
+      }, PING_MS);
+    };
+    sock.onmessage = (e) => {
+      heard = Date.now();
+      if (e.data === "pong" || sock !== ws) return;
+      try { onMsg(JSON.parse(e.data), at); } catch {}
+    };
+    const lost = () => {
+      clearTimeout(beat);
+      sock.onclose = null;
+      try { sock.close(); } catch {}
+      gone();
+    };
+    sock.onclose = () => gone();
+    const gone = () => {
       clearTimeout(timer);
+      clearTimeout(beat);
       if (stopped || sock !== ws) return;
       LIVE.drops++;
       // a server that doesn't answer a few times in a row: the other one
@@ -1296,6 +1327,13 @@ function playScreen(code, name, key = "") {
   let lastKey = "";
   const gone = new Set(); // servers that said they don't have this ronda
   let seen = false; // a view came: "gone" now means it ended, not "no such code"
+  // the host's screen dropped: after a few seconds (a reload is quicker) a line says so, and goes when it's back
+  let hostTimer = 0;
+  const hostLine = (off) => {
+    if (!off) { clearTimeout(hostTimer); hostTimer = 0; $("#pHost").hidden = true; return; }
+    if (!hostTimer && $("#pHost").hidden) hostTimer = setTimeout(() => { hostTimer = 0; $("#pHost").hidden = false; }, HOST_GRACE_MS);
+  };
+  hostLine(false);
   // every (re)open redraws: a tap greyed while the link was down shows again as the server has it (U-R1)
   live = connect(code, () => { lastKey = ""; live.send({ t: "join", id: pidFor(code), name, k: key }); }, (m, at) => {
     if (m.t === "moved" && otherOf(at) !== at) return live.move(otherOf(at));
@@ -1315,6 +1353,7 @@ function playScreen(code, name, key = "") {
     if (m.t === "qa-full") return toast(t("No more questions can be asked here"));
     if (m.t === "qa-closed") return toast(t("The host closed questions for now"));
     if (m.t !== "view") return;
+    hostLine(m.host === false && !m.self);
     live.onView?.(m);
     $("#pName").textContent = m.name;
     $("#pScore").textContent = m.score || (m.phase !== "lobby" && m.phase !== "question" && scored(m.kind)) ? t("{n} points", { n: m.score || 0 }) : "";

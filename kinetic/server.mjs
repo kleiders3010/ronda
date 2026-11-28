@@ -292,6 +292,8 @@ server.on("upgrade", async (req, socket, head) => {
     ws.on("message", (data, binary) => {
       // our pages send no binary: such a frame closes the socket (audit R2-3: they were ignored without a count)
       if (binary) return void ws.close(1003, "text only");
+      // the phones' heartbeat, like the Worker's auto-response: answered here, the room isn't run for it
+      if (data.length === 4 && data.toString() === "ping") return void ws.send("pong");
       run(r, () => r.room.webSocketMessage(ws, data.toString()));
     });
     ws.on("close", () => {

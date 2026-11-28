@@ -443,3 +443,6 @@ div.typed .chip.ok { outline: 2px solid #86efac; }
   .page.light .qnum { background: #3a3360; }
   .page.light .mineRow.running { outline-color: #c4b5fd; }
 }
+/* the host's screen dropped: said on the phone, in the page (not a toast that goes) */
+.hostGone { margin: 8px 12px 0; padding: 10px 14px; border-radius: 12px; background: #fef3c7; color: #422006; font-weight: 700; }
+.hostGone[hidden] { display: none; }

@@ -471,6 +471,10 @@ export class Room {
   constructor(state, env) {
     this.state = state;
     this.env = env || {};
+    // the phones' heartbeat (a half-open link that never closes is found and reopened): "ping" is answered "pong"
+    // without waking this object, so it costs no request (the game host answers it in kinetic/server.mjs)
+    if (state.setWebSocketAutoResponse && typeof WebSocketRequestResponsePair === "function")
+      state.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     this.g = null; // the game, loaded from storage on first use (the object may have slept)
     this.flushTimer = null;
   }
@@ -644,8 +648,12 @@ export class Room {
 
     if (msg.t === "host") {
       if (!same(msg.token, g.host)) return this.nope(ws);
+      const back = !this.hostHere(ws);
       this.setAtt(ws, { role: "host" });
-      return this.toHost(ws);
+      this.toHost(ws);
+      // the host's screen is back: the phones take their "host's connection dropped" line away
+      if (back && !g.self) this.everyone();
+      return;
     }
     if (msg.t === "join") {
       const raw = String(msg.id || "");
@@ -1304,7 +1312,8 @@ export class Room {
     const g = this.g;
     if (g.self) return this.selfView(id);
     const p = g.players[id];
-    const base = { t: "view", phase: g.phase, name: p.name, score: p.score, title: g.quiz?.title || "" };
+    // host: is the host's screen connected (a phone says so when it dropped, instead of waiting without a word)
+    const base = { t: "view", phase: g.phase, name: p.name, score: p.score, title: g.quiz?.title || "", host: this.hostHere() };
     // with teams a phone shows its team's points and place (Kahoot: "Player scores are not visible during gameplay")
     const tr = this.teamRanking();
     const mineT = tr && tr.find((x) => x.k === p.team);
@@ -1336,10 +1345,21 @@ export class Room {
     }
   }
 
+  /** A host screen is connected (but: the one closing now, still listed while its close runs). */
+  hostHere(but = null) {
+    return this.sockets("host").some((s) => s !== but && s !== this.leaving && (s.readyState ?? 1) <= 1);
+  }
+
   async webSocketClose(ws) {
     this.budget?.delete(ws);
     this.quizSent?.delete(ws);
-    if (this.att(ws).role === "player" && (await this.game())) this.hostsUpdate();
+    const role = this.att(ws).role;
+    if (role === "player" && (await this.game())) this.hostsUpdate();
+    // the host's screen dropped: the phones say so (a self-paced ronda needs no host)
+    if (role === "host" && (await this.game()) && !this.g.self && !this.hostHere(ws)) {
+      this.leaving = ws;
+      try { this.everyone(); } finally { this.leaving = null; }
+    }
   }
 }
 

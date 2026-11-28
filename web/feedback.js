@@ -141,7 +141,8 @@ export function openFeedback(o) {
   document.addEventListener("keydown", onKey);
   cancel.onclick = close;
   sheet.onclick = (e) => {
-    if (e.target === sheet) close(); // a block: an onclick that returns false cancels the click (Send stopped working)
+    // a tap outside closes it only while nothing is written (APP-RULES 174; Sumate UX review U-S27)
+    if (e.target === sheet && !msg.value.trim() && !email.value.trim()) close(); // a block: an onclick that returns false cancels the click (Send stopped working)
   };
   box.onsubmit = async (e) => {
     e.preventDefault();

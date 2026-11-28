@@ -6,7 +6,6 @@ import { FEEDBACK_ES } from "./feedback.js";
 const DICT = {
   es: { // Spanish as spoken in Argentina (vos)
     ...FEEDBACK_ES,
-    "Report a problem or idea": "Contar un problema o una idea",
     "Feedback": "Comentarios",
     "Include technical details": "Incluir detalles técnicos",
     "Ronda · free live quizzes and polls": "Ronda · preguntas y encuestas en vivo, gratis",
@@ -14,8 +13,6 @@ const DICT = {
     "Join": "Entrar",
     "Make a quiz or poll": "Crear una trivia o encuesta",
     "Your rondas": "Tus rondas",
-    "Free, no account, up to 500 players": "Gratis, sin cuenta, hasta 500 jugadores",
-    "Open source": "Código abierto",
     "Free, no account, up to 500 players · Open source": "Gratis, sin cuenta, hasta 500 jugadores · Código abierto",
     "Privacy": "Privacidad",
     "Your name": "Tu nombre",
@@ -30,9 +27,6 @@ const DICT = {
     "Scale": "Escala",
     "Type answer": "Escribir la respuesta",
     "+ Answer": "+ Respuesta",
-    "Questions": "Preguntas",
-    "Questions ({n})": "Preguntas ({n})",
-    "Questions ({n} to approve)": "Preguntas ({n} por aprobar)",
     "Ask the host": "Consultar",
     "Ask the host ({n})": "Consultar ({n})",
     "Audience questions": "Consultas del público",
@@ -271,6 +265,7 @@ const DICT = {
     "{n} person is in. Tap the name to move it to another team or remove it.": "Hay {n} persona. Tocá el nombre para pasarla a otro equipo o sacarla.",
     // the live link (U-R1), Close (U-R3)
     "Reconnecting…": "Reconectando…",
+    "The host's screen lost its connection. Stay here: the game goes on when it's back.": "La pantalla de quien organiza perdió la conexión. Quedate acá: el juego sigue cuando vuelva.",
     "Can't reach Ronda. Check the internet.": "No se puede llegar a Ronda. Revisá la conexión a internet.",
     "Close anyway": "Cerrar igual",
     // leaving a running game (U-R2)
