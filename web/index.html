@@ -21,9 +21,9 @@
     <div class="brand"><img src="/img/icon-192.png" alt="" class="logo"><h1>Ronda</h1></div>
     <form id="codeForm" class="card">
       <label for="code" class="big-label">Enter the code from the screen</label>
-      <input id="code" class="code-input" inputmode="numeric" autocomplete="off" maxlength="7" >
+      <input id="code" class="code-input" inputmode="numeric" autocomplete="off" maxlength="7" aria-describedby="codeMsg">
+      <p id="codeMsg" class="msg" aria-live="polite" hidden></p>
       <button class="btn primary wide">Join</button>
-      <p id="codeMsg" class="msg" hidden></p>
     </form>
     <button id="makeBtn" class="btn ghost wide">Make a quiz or poll</button>
     <div id="mineWrap" hidden>
@@ -53,6 +53,7 @@
 <section id="play" class="page player" hidden>
   <header class="pbar"><span id="pName" class="pname"></span><span id="pTeam" class="pteam" hidden></span><button type="button" id="pQa" class="btn chip qaBtn" hidden>Questions</button><span id="pScore" class="pscore"></span></header>
   <main id="pMain" class="pmain"></main>
+  <p id="pSay" class="sr" aria-live="polite"></p>
   <div id="pQaBox" class="qaBox" hidden>
     <header class="qaHead"><b>Questions for the host</b><button type="button" id="pQaClose" class="btn chip">Close</button></header>
     <form id="askForm" class="askForm">
@@ -87,10 +88,13 @@
     <p id="editMsg" class="msg" hidden></p>
   </div>
   <footer class="efoot">
-    <button id="shareBtn" class="btn ghost">Share</button>
-    <button id="fileBtn" class="btn ghost">Save as file</button>
-    <button id="delBtn" class="btn ghost danger-text">Delete</button>
-    <button id="assignBtn" class="btn ghost">Assign</button>
+    <button id="moreBtn" class="btn ghost more" aria-haspopup="true" aria-expanded="false" aria-controls="moreMenu" aria-label="More">⋮</button>
+    <div id="moreMenu" class="emenu">
+      <button id="shareBtn" class="btn ghost">Share</button>
+      <button id="fileBtn" class="btn ghost">Save as file</button>
+      <button id="assignBtn" class="btn ghost">Assign</button>
+      <button id="delBtn" class="btn ghost danger-text">Delete</button>
+    </div>
     <button id="startBtn" class="btn primary big">Start</button>
   </footer>
 </section>

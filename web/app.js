@@ -54,11 +54,20 @@ function isRight(q, v) {
 const fmtCode = (c) => c.slice(0, 3) + " " + c.slice(3);
 const randId = (n = 16) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => "abcdefghijkmnpqrstuvwxyz23456789"[b % 32]).join("");
 
-function toast(text, ms = 3200) {
+function toast(text, ms = 3200, act) {
   const d = el("div", "toast", text);
+  // an Undo in the toast (UX review U-R8): the toast stays 8 s, the button takes the tap
+  if (act) {
+    const b = el("button", "toastAct", act.label);
+    b.onclick = () => { d.remove(); act.run(); };
+    d.append(b);
+    d.classList.add("hasAct");
+    ms = Math.max(ms, 8000);
+  }
   $("#toasts").append(d);
   // long enough to read: at least 5 s, more for long text (Juntos UX review U-J7)
   setTimeout(() => d.remove(), Math.max(ms, 5000, String(text).length * 70));
+  return d;
 }
 
 // every key starts with "ronda." (audit R11: the GitHub Pages copy shares its storage with our other apps)
@@ -88,6 +97,61 @@ document.addEventListener("click", (e) => {
   });
 });
 
+// a field named only by its placeholder gets it as its accessible name too (UX review U-R12)
+function nameFields(root = document) {
+  for (const f of root.querySelectorAll("input[placeholder]:not([aria-label]), textarea[placeholder]:not([aria-label])"))
+    if (!f.labels?.length) f.setAttribute("aria-label", f.placeholder);
+}
+// (first run after translatePage, at the end)
+new MutationObserver(() => nameFields()).observe(document.body, { childList: true, subtree: true });
+
+// One helper for the sheets (UX review U-R16): named by their heading, Esc closes, Tab stays inside, the focus
+// goes back where it was, Back closes the sheet (not the page under it), and a tap outside closes it only while
+// nothing in it was changed. close("done") is for the sheet's own action: no focus return, onClose("done") then
+// moves on.
+let sheetNow = null, sheetPopSkip = null;
+function sheetOpen(sheet, head, { first, onClose } = {}) {
+  sheet.setAttribute("role", "dialog");
+  sheet.setAttribute("aria-modal", "true");
+  if (!head.id) head.id = "sheetHead" + randId(4);
+  sheet.setAttribute("aria-labelledby", head.id);
+  const back = document.activeElement;
+  let changed = false;
+  sheet.addEventListener("input", () => { changed = true; });
+  sheet.addEventListener("change", () => { changed = true; });
+  const onKey = (e) => {
+    if (e.key === "Escape") { e.preventDefault(); return api.close(); }
+    if (e.key !== "Tab") return;
+    const f = [...sheet.querySelectorAll("button, input, select, textarea, a[href]")].filter((x) => !x.disabled && x.offsetParent);
+    if (!f.length) return;
+    const a = f[0], z = f[f.length - 1];
+    if (!sheet.contains(document.activeElement)) { e.preventDefault(); a.focus(); }
+    else if (e.shiftKey && document.activeElement === a) { e.preventDefault(); z.focus(); }
+    else if (!e.shiftKey && document.activeElement === z) { e.preventDefault(); a.focus(); }
+  };
+  document.addEventListener("keydown", onKey);
+  sheet.addEventListener("click", (e) => { if (e.target === sheet && !changed) api.close(); });
+  history.pushState({ sheet: 1 }, "", location.href);
+  const api = {
+    close(how) {
+      if (sheetNow !== api) return;
+      sheetNow = null;
+      sheet.remove();
+      document.removeEventListener("keydown", onKey);
+      const after = () => {
+        if (how !== "done" && back?.isConnected) back.focus();
+        onClose?.(how);
+      };
+      if (how !== "pop" && history.state?.sheet) { sheetPopSkip = after; history.back(); } else after();
+    },
+  };
+  sheetNow?.close("pop");
+  sheetNow = api;
+  document.body.append(sheet);
+  setTimeout(() => (first || sheet.querySelector("button, input"))?.focus(), 50);
+  return api;
+}
+
 // ---------------- pages ----------------
 function show(id) {
   for (const s of document.querySelectorAll(".page")) s.hidden = s.id !== id;
@@ -99,9 +163,12 @@ function go(path, replace = false) {
 }
 // a player who opened the game's link has nothing behind it: playScreen adds one entry, and Back on it asks (U-R2)
 window.addEventListener("popstate", () => {
+  if (sheetPopSkip) { const f = sheetPopSkip; sheetPopSkip = null; return f(); }
+  if (sheetNow) return sheetNow.close("pop");
   if (live?.guard?.() && here() === live.path) return askLeave("/");
   route();
 });
+document.addEventListener("keydown", (e) => live?.keys?.(e));
 document.addEventListener("click", (e) => {
   if (e.target.closest("[data-home]")) { e.preventDefault(); go("/"); }
 });
@@ -326,34 +393,33 @@ async function importLink(s) {
   homeScreen();
   const sheet = el("div", "asgSheet");
   sheet.id = "addSheet";
-  sheet.setAttribute("role", "dialog");
-  sheet.setAttribute("aria-modal", "true");
   const box = el("div", "asgBox card");
   const no = el("button", "btn ghost", t("Cancel"));
   const yes = el("button", "btn primary", t("Add to my rondas"));
   yes.name = "add";
   const row = el("div", "asgBtns");
   row.append(no, yes);
-  box.append(el("h2", "asgHead", t("Add this ronda?")), el("p", "", data.title || t("Untitled")),
+  const head = el("h2", "asgHead", t("Add this ronda?"));
+  box.append(head, el("p", "", data.title || t("Untitled")),
     el("p", "small", t("{n} questions", { n: data.questions.length })), row);
   sheet.append(box);
-  document.body.append(sheet);
-  const close = () => { sheet.remove(); history.replaceState(null, "", location.pathname + location.search); };
-  no.onclick = close;
-  sheet.onclick = (e) => { if (e.target === sheet) close(); };
+  let made = null;
+  const sh = sheetOpen(sheet, head, { first: yes, onClose: (how) => {
+    if (how === "done") return go("/edit/" + made.id, true);
+    history.replaceState(null, "", location.pathname + location.search);
+  } });
+  no.onclick = () => sh.close();
   yes.onclick = async () => {
     yes.disabled = true;
     try {
-      const q = await adopt(data);
-      sheet.remove();
+      made = await adopt(data);
       toast(t("Saved to your rondas"));
-      go("/edit/" + q.id, true);
+      sh.close("done");
     } catch (e) {
       yes.disabled = false;
       if (e.message !== "full") toast(t("That link is broken"));
     }
   };
-  setTimeout(() => yes.focus(), 50);
 }
 $("#importFile").addEventListener("change", async (e) => {
   const f = e.target.files[0];
@@ -370,7 +436,7 @@ $("#importFile").addEventListener("change", async (e) => {
 // ---------------- home ----------------
 function homeScreen() {
   show("home");
-  $("#codeMsg").hidden = true;
+  codeErr("");
   const list = allQuizzes();
   $("#mineWrap").hidden = false;
   const ul = $("#mine");
@@ -409,38 +475,91 @@ function homeScreen() {
 $("#code").addEventListener("input", (e) => {
   const d = e.target.value.replace(/\D/g, "").slice(0, 6);
   e.target.value = d.length > 3 ? d.slice(0, 3) + " " + d.slice(3) : d;
+  codeErr("");
 });
-$("#codeForm").addEventListener("submit", (e) => {
+// the message sits under the field and is tied to it (U-R6: a screen reader didn't hear it); the digits stay
+function codeErr(text) {
+  $("#codeMsg").textContent = text;
+  $("#codeMsg").hidden = !text;
+  if (text) $("#code").setAttribute("aria-invalid", "true");
+  else $("#code").removeAttribute("aria-invalid");
+}
+// The code is checked before the name step (UX review U-R6: a mistyped code was found only after the name, and Back
+// emptied the field): the code's own server, then the other one if it doesn't have it. Anything but a clear answer
+// (no network, an older server) goes on to the name step as before; a code this phone already played goes on too
+// (a returning player gets back in, even to a locked or finished ronda).
+async function peekCode(code) {
+  try { if ((JSON.parse(safeGet("pids") || "{}") || {})[code]) return "here"; } catch {}
+  let at = homeOf(code);
+  const tried = new Set();
+  for (;;) {
+    tried.add(at);
+    let r = "unknown";
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 4000);
+    try {
+      const res = await fetch(SERVERS[at].replace(/^ws/, "http") + "/api/room/" + code, { signal: ctl.signal });
+      if (res.ok) r = String((await res.json()).t || "unknown");
+    } catch {} finally { clearTimeout(timer); }
+    if (r === "gone" && !tried.has(otherOf(at))) { at = otherOf(at); continue; }
+    return r;
+  }
+}
+const CODE_SAYS = {
+  gone: "No ronda is running with this code. For an assignment, open the link you were sent.",
+  over: "This game has ended",
+  locked: "The host has locked this ronda",
+  slow: "Too many tries from this network. Wait a minute and try again.",
+};
+$("#codeForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const d = $("#code").value.replace(/\D/g, "");
-  if (d.length !== 6) {
-    $("#codeMsg").textContent = t("The code has 6 numbers");
-    $("#codeMsg").hidden = false;
-    return;
-  }
+  if (d.length !== 6) return codeErr(t("The code has 6 numbers")), $("#code").focus();
+  const b = $("#codeForm button");
+  if (b.disabled) return;
+  b.disabled = true;
+  b.textContent = t("Checking…");
+  const r = await peekCode(d);
+  b.disabled = false;
+  b.textContent = t("Join");
+  if (CODE_SAYS[r]) return codeErr(t(CODE_SAYS[r])), $("#code").focus();
   go("/" + d);
 });
+// a new ronda is saved at its first change, never blank (UX review U-R20: untouched blanks piled up on the home list)
+let fresh = null;
 $("#makeBtn").onclick = () => {
-  const q = blankQuiz();
-  putQuiz(q);
-  go("/edit/" + q.id);
+  fresh = blankQuiz();
+  go("/edit/" + fresh.id);
 };
 
 // ---------------- editor ----------------
 let editing = null;
+const kept = new WeakMap(); // question -> what an earlier kind held (U-R8), never saved
+// an Undo for this editor: does nothing once another ronda is open
+function undoToast(text, put) {
+  const was = editing;
+  toast(text, 8000, { label: t("Undo"), run: () => {
+    if (editing !== was || here() !== "/edit/" + was.id) return;
+    put();
+    touch();
+    renderQuestions();
+  } });
+}
 let saveTimer = null;
 function touch() {
   $("#saved").textContent = t("Saving…");
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => { $("#saved").textContent = putQuiz(editing) ? t("Saved") : t("Not saved"); }, 400);
+  saveTimer = setTimeout(() => { if (fresh === editing) fresh = null; $("#saved").textContent = putQuiz(editing) ? t("Saved") : t("Not saved"); }, 400);
 }
 
 function editScreen(id) {
-  editing = getQuiz(id);
+  editing = getQuiz(id) || (fresh?.id === id ? fresh : null);
+  if (fresh?.id !== id) fresh = null;
   if (!editing) return go("/", true);
   show("edit");
   $("#title").value = editing.title;
   $("#editMsg").hidden = true;
+  moreMenu(false);
   $("#delBtn").textContent = t("Delete");
   renderQuestions();
 }
@@ -474,15 +593,28 @@ function renderQuestions() {
     }
     kind.value = q.kind;
     kind.onchange = () => {
+      // what the new kind can't hold is kept aside while this editor is open (UX review U-R8: Quiz -> Words -> Quiz
+      // lost every answer and the ✓), so changing back brings it back; Undo puts the old question back as it was
+      const keep = { ...(kept.get(q) || {}), ...q };
       const n = newQuestion(kind.value);
       n.text = q.text;
       if (q.img) n.img = q.img;
-      if (q.answers && n.answers) n.answers = q.answers;
-      if (q.aimg && (n.kind === "quiz" || n.kind === "poll")) n.aimg = q.aimg;
-      if (q.pts != null && scored(n.kind)) n.pts = q.pts;
+      if (keep.answers && n.answers) n.answers = keep.answers;
+      if (n.kind === "quiz" && keep.correct && keep.answers === n.answers) n.correct = keep.correct;
+      if (n.kind === "type" && keep.accept) n.accept = keep.accept;
+      if (n.kind === "slider" && keep.min != null) Object.assign(n, { min: keep.min, max: keep.max, ans: keep.ans, margin: keep.margin });
+      if (keep.aimg && (n.kind === "quiz" || n.kind === "poll")) n.aimg = keep.aimg;
+      if (keep.pts != null && scored(n.kind)) n.pts = keep.pts;
+      kept.set(n, keep);
       editing.questions[i] = n;
       touch();
       renderQuestions();
+      const lost = (q.answers && !n.answers && q.answers.some((a) => a.trim())) || (q.kind === "quiz" && n.kind !== "quiz")
+        || (q.kind === "type" && q.accept.some((a) => a.trim())) || (q.kind === "slider" && String(q.ans) !== "");
+      if (lost) undoToast(t("Changed to {kind}. What it can't use comes back if you change it back.", { kind: t(KIND_NAME[n.kind]) }), () => {
+        const at = editing.questions.indexOf(n);
+        if (at >= 0) editing.questions[at] = q;
+      });
     };
     const time = el("select", "time");
     for (const s of timeOptions(q.kind)) {
@@ -493,10 +625,12 @@ function renderQuestions() {
     time.value = q.time;
     time.onchange = () => { q.time = Number(time.value); touch(); };
     time.title = t("Time to answer");
+    time.setAttribute("aria-label", t("Time to answer"));
+    kind.setAttribute("aria-label", t("Question type"));
     const tools = el("span", "qtools");
-    const up = el("button", "icon", "↑"); up.title = t("Move up");
-    const down = el("button", "icon", "↓"); down.title = t("Move down");
-    const del = el("button", "icon", "✕"); del.title = t("Remove question");
+    const up = el("button", "icon", "↑"); up.title = t("Move up"); up.setAttribute("aria-label", t("Move up"));
+    const down = el("button", "icon", "↓"); down.title = t("Move down"); down.setAttribute("aria-label", t("Move down"));
+    const del = el("button", "icon rmq", "✕"); del.title = t("Remove question"); del.setAttribute("aria-label", t("Remove question"));
     up.disabled = i === 0;
     down.disabled = i === editing.questions.length - 1;
     const move = (d) => {
@@ -511,6 +645,8 @@ function renderQuestions() {
       editing.questions.splice(i, 1);
       touch();
       renderQuestions();
+      // Undo puts it back where it was (UX review U-R8: one tap removed a question for good)
+      undoToast(t("Question {n} removed", { n: i + 1 }), () => editing.questions.splice(Math.min(i, editing.questions.length), 0, q));
     };
     tools.append(up, down, del);
     head.append(kind, time, tools);
@@ -714,6 +850,25 @@ function showProblem(msg) {
   }, 80);
 }
 
+// the ⋮ menu of the phone footer (U-R15): an item closes it (Delete's first tap keeps it open to ask again),
+// Esc and a tap outside close it, the focus goes back to ⋮
+function moreMenu(open) {
+  $("#moreMenu").classList.toggle("open", open);
+  $("#moreBtn").setAttribute("aria-expanded", String(open));
+  if (open) $("#moreMenu .btn")?.focus();
+}
+$("#moreBtn").onclick = () => moreMenu(!$("#moreMenu").classList.contains("open"));
+$("#moreMenu").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (b && !(b.id === "delBtn" && b.dataset.armed)) moreMenu(false);
+});
+document.addEventListener("pointerdown", (e) => {
+  if ($("#moreMenu").classList.contains("open") && !e.target.closest("#moreMenu, #moreBtn")) moreMenu(false);
+});
+$("#moreMenu").addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { moreMenu(false); $("#moreBtn").focus(); }
+});
+
 $("#startBtn").onclick = () => {
   putQuiz(editing);
   startHosting(editing);
@@ -727,8 +882,14 @@ $("#delBtn").onclick = () => {
     return;
   }
   delete b.dataset.armed;
-  saveQuizzes(allQuizzes().filter((x) => x.id !== editing.id));
-  toast(t("Deleted"));
+  const gone = editing;
+  saveQuizzes(allQuizzes().filter((x) => x.id !== gone.id));
+  // Undo for a whole ronda too (UX review U-R8)
+  toast(t("Deleted"), 8000, { label: t("Undo"), run: () => {
+    const list = allQuizzes().filter((x) => x.id !== gone.id);
+    list.unshift(gone);
+    if (saveQuizzes(list) && here() === "/") homeScreen();
+  } });
   go("/");
 };
 $("#shareBtn").onclick = async () => {
@@ -1129,7 +1290,7 @@ function playScreen(code, name, key = "") {
     if (m.t === "view") gone.clear(), (seen = true);
     if (m.t === "slow") return endMsg(t("Too many tries from this network. Wait a minute and try again."));
     if (m.t === "gone" && !seen) return endMsg(t("No ronda is running with this code. For an assignment, open the link you were sent."));
-    if (m.t === "gone" || m.t === "closed") return endMsg(t("This ronda has ended. Thanks for playing!"));
+    if (m.t === "gone" || m.t === "closed") return endMsg(t("This game has ended. Thanks for playing!"));
     if (m.t === "over") return endMsg(t("This ronda has already finished."));
     if (m.t === "full") return endMsg(t("This ronda is full ({max} people)", { max: m.max }));
     if (m.t === "locked") return endMsg(t("The host has locked this ronda"));
@@ -1146,8 +1307,16 @@ function playScreen(code, name, key = "") {
     // keep a half-typed word when only the count changed
     const key = [m.phase, m.qi, JSON.stringify(m.mine), m.phase === "lobby" ? JSON.stringify([m.teams, m.team?.k]) : "", m.self && m.phase === "end" ? JSON.stringify([m.top, m.rank, m.of]) : ""].join("|");
     if (key === lastKey) return;
+    const turn = [m.phase, m.qi].join("|") !== lastKey.split("|").slice(0, 2).join("|");
     lastKey = key;
     main.replaceChildren(...playerView(m));
+    // a screen reader hears each new question and each result (UX review U-R12: the swap was silent), and the
+    // focus moves to the question when nothing on it takes the focus itself
+    if (turn) {
+      $("#pSay").textContent = [...main.querySelectorAll(".progress, .ptext, .big-ok, .place")].map((x) => x.textContent.trim()).filter(Boolean).join(". ");
+      const h = main.querySelector(".ptext, .big-ok");
+      if (h && !main.querySelector("input, textarea")) { h.tabIndex = -1; h.focus({ preventScroll: true }); }
+    }
     // team talk: the question and its answers show, answering opens when it is over
     if (m.phase === "question" && m.talk && m.readIn > 300) {
       const shut = [...main.querySelectorAll("button, input, select, textarea")].filter((x) => !x.disabled);
@@ -1209,7 +1378,7 @@ function drawPlayerQa() {
   if (!qa) return;
   $("#askForm").hidden = !qa.open;
   $("#askClosed").hidden = qa.open;
-  for (const b of document.querySelectorAll("#pQaBox [data-sort]")) b.classList.toggle("on", b.dataset.sort === qaSort);
+  for (const b of document.querySelectorAll("#pQaBox [data-sort]")) b.classList.toggle("on", b.dataset.sort === qaSort), b.setAttribute("aria-pressed", String(b.dataset.sort === qaSort));
   const ul = $("#pQaList");
   ul.replaceChildren(...qaSorted(qa.list).map((x) => {
     const li = el("li", "qaItem " + (x.st || "live"));
@@ -1351,6 +1520,7 @@ function playerView(m) {
       const row = el("div", "scale");
       for (let v = 1; v <= 5; v++) {
         const b = el("button", "sv" + (m.mine === v ? " on" : ""), String(v));
+        b.setAttribute("aria-pressed", String(m.mine === v)); // U-R12: not by colour only
         b.onclick = () => live.send({ t: "answer", qi: m.qi, v });
         row.append(b);
       }
@@ -1599,6 +1769,24 @@ function hostScreen(code) {
     if (st.phase === "lobby" && !st.players.length) return toast(t("Wait for people to join first"));
     live.send({ t: "next" });
   };
+  // presenter keys (UX review U-R18): a clicker's Page Down / → or Enter press the main button when no field or
+  // other button has the focus and no box is open; a held key and a double press within 0.7 s count once
+  let keyAt = 0;
+  live.keys = (e) => {
+    if (!["PageDown", "ArrowRight", "Enter"].includes(e.key) || e.repeat || e.altKey || e.ctrlKey || e.metaKey) return;
+    if ($("#host").hidden || $("#hNext").hidden || $("#hNext").disabled) return;
+    // where the key was typed counts too: Enter in a team name blurs the field before this runs (teams_test)
+    if (e.target !== document.body && e.target !== document.documentElement && e.target !== $("#hNext")
+      && e.target.closest?.("input, textarea, select, button, a, [contenteditable], [role=dialog], [role=alertdialog]")) return;
+    const a = document.activeElement;
+    if (a === $("#hNext")) { if (e.key === "Enter") return; } // Enter on the button itself presses it already
+    else if (a && a !== document.body && a.closest("input, textarea, select, button, a, [contenteditable], [role=dialog], [role=alertdialog]")) return;
+    if (document.getElementById("leaveAsk") || !$("#hQaShow").hidden) return;
+    e.preventDefault();
+    if (Date.now() - keyAt < 700) return;
+    keyAt = Date.now();
+    $("#hNext").click();
+  };
   $("#hFull").onclick = () => {
     if (document.fullscreenElement) document.exitFullscreen();
     else document.documentElement.requestFullscreen?.().catch(() => {});
@@ -1640,7 +1828,7 @@ function drawHostQa() {
   if (!qa || $("#hQaPanel").hidden) return;
   $("#qaOpen").checked = qa.open;
   $("#qaMod").checked = qa.mod;
-  for (const b of document.querySelectorAll("#hQaPanel [data-sort]")) b.classList.toggle("on", b.dataset.sort === qaSort);
+  for (const b of document.querySelectorAll("#hQaPanel [data-sort]")) b.classList.toggle("on", b.dataset.sort === qaSort), b.setAttribute("aria-pressed", String(b.dataset.sort === qaSort));
   const act = (label, d, x, cls = "btn chip dim") => {
     const b = el("button", cls, t(label));
     b.name = d;
@@ -2155,8 +2343,6 @@ function openAssign(q) {
   }
   const sheet = el("div", "asgSheet");
   sheet.id = "asgSheet";
-  sheet.setAttribute("role", "dialog");
-  sheet.setAttribute("aria-modal", "true");
   const box = el("form", "asgBox card");
   box.noValidate = true;
   const when = el("input");
@@ -2181,20 +2367,20 @@ function openAssign(q) {
   out.hidden = true;
   const cancel = el("button", "btn ghost", t("Cancel"));
   cancel.type = "button";
-  cancel.onclick = () => sheet.remove();
+  cancel.onclick = () => sh.close();
   const make = el("button", "btn primary", t("Create assignment"));
   make.name = "make";
   const row = el("div", "asgBtns");
   row.append(cancel, make);
-  box.append(el("h2", "asgHead", t("Assign")),
+  const head = el("h2", "asgHead", t("Assign"));
+  box.append(head,
     el("p", "small", t("Everyone plays on their own phone, at their own pace, until the time you pick. No big screen.")),
     el("label", "asgLabel", t("Answer by")), when, mixRow, topRow);
   if (q.questions.some((x) => x.img || x.aimg?.some(Boolean))) box.append(el("p", "small", t("Pictures stay on this device: phones get the words only.")));
   box.append(out, row);
   sheet.append(box);
-  sheet.onclick = (e) => { if (e.target === sheet) sheet.remove(); };
-  document.body.append(sheet);
-  setTimeout(() => make.focus(), 50);
+  let made = null;
+  const sh = sheetOpen(sheet, head, { first: make, onClose: (how) => { if (how === "done") go("/report/" + made); } });
   box.onsubmit = async (e) => {
     e.preventDefault();
     const until = new Date(when.value).getTime();
@@ -2220,8 +2406,8 @@ function openAssign(q) {
     }, (m) => {
       if (m.t === "report") {
         if (!putAssigned(rec)) toast(t("This device couldn't keep the key to this assignment. Copy its link now: without it nobody can open the report."));
-        sheet.remove();
-        go("/report/" + room.code);
+        made = room.code;
+        sh.close("done");
       } else if (m.t === "bad-quiz" || m.t === "bad-until") {
         closeLive();
         make.disabled = false;
@@ -2425,6 +2611,7 @@ function drawAssigned() {
 
 // ---------------- start ----------------
 translatePage();
+nameFields();
 route();
 
 // the offline page (sw.js): opening the app with no connection shows ours, not the browser's error page

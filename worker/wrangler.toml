@@ -35,3 +35,9 @@ simple = { limit = 600, period = 60 }
 name = "WAKES"
 namespace_id = "2106"
 simple = { limit = 600, period = 60 }
+
+# the code screen's "is this code in use?" (U-R6), per address, before a room wakes: a hall of 500 fits
+[[ratelimits]]
+name = "PEEKS"
+namespace_id = "2107"
+simple = { limit = 600, period = 60 }

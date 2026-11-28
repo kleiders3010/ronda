@@ -74,7 +74,7 @@ const DICT = {
     "Put in order": "Ordenar",
     "Ask a question people answer by typing": "Hacé una pregunta que se responde escribiendo",
     "Ask people to put things in order": "Pedí que ordenen cosas",
-    "Slider": "Deslizar",
+    "Slider": "Deslizador",
     "Ask for a number (a year, a price, an amount)": "Pedí un número (un año, un precio, una cantidad)",
     "People move a slider to their guess. The closer, the more points.": "Cada uno mueve un deslizador hasta su respuesta. Cuanto más cerca, más puntos.",
     "Only {a} gets points.": "Solo {a} suma puntos.",
@@ -133,6 +133,12 @@ const DICT = {
     "Code {code}": "Código {code}",
     "Couldn't start. Check the internet and try again.": "No se pudo empezar. Revisá internet y probá de nuevo.",
     "Deleted": "Borrada",
+    "Undo": "Deshacer",
+    "Question {n} removed": "Se quitó la pregunta {n}",
+    "Changed to {kind}. What it can't use comes back if you change it back.": "Cambiada a {kind}. Lo que no usa vuelve si la volvés a cambiar.",
+    "Question type": "Tipo de pregunta",
+    "Checking…": "Revisando…",
+    "This game has ended": "Esta ronda terminó",
     "Download results": "Descargar resultados",
     "Everyone can send up to 3 words. They show as a word cloud.": "Cada uno puede mandar hasta 3 palabras. Se ven como una nube de palabras.",
     "Everyone picks 1 to 5. Shows the average.": "Cada uno elige del 1 al 5. Se ve el promedio.",
@@ -201,10 +207,10 @@ const DICT = {
     "That file isn't a ronda": "Ese archivo no es una ronda",
     "That link is broken": "Ese enlace está roto",
     "The code has 6 numbers": "El código tiene 6 números",
-    "The host removed you from this ronda.": "Quien organiza te sacó de esta ronda.",
+    "The host removed you from this ronda.": "Quien presenta te sacó de esta ronda.",
     "This ronda has already finished.": "Esta ronda ya terminó.",
     "This ronda has ended": "Esta ronda terminó",
-    "This ronda has ended. Thanks for playing!": "Esta ronda terminó. ¡Gracias por jugar!",
+    "This game has ended. Thanks for playing!": "Esta ronda terminó. ¡Gracias por jugar!",
     "Not saved: this browser's storage is full. Delete a ronda you don't need.": "No se guardó: el almacenamiento del navegador está lleno. Borrá una ronda que no necesites.",
     "Not saved": "Sin guardar",
     "{n} pictures couldn't be kept": "No se pudieron guardar {n} imágenes",
@@ -218,7 +224,7 @@ const DICT = {
     "Top 5 hidden at the end: show it": "Los 5 primeros no se ven al final: mostrarlos",
     "Send this link: the code alone doesn't open an assignment.": "Mandá este enlace: el código solo no abre una tarea.",
     "This ronda is full ({max} people)": "Esta ronda está llena ({max} personas)",
-    "The host has locked this ronda": "Quien la presenta cerró esta ronda a gente nueva",
+    "The host has locked this ronda": "Quien presenta cerró esta ronda a gente nueva",
     "Unlock: let new people join": "Abrir: que pueda entrar gente nueva",
     "Lock: nobody new can join": "Cerrar: que no entre nadie más",
     "Remove everyone who joined in the last minute": "Sacar a todos los que entraron en el último minuto",
@@ -274,7 +280,7 @@ const DICT = {
     "{team}: {rank} of {of}": "{team}: {rank} de {of}",
     "Team talk: decide together": "Charla de equipo: decidan juntos",
     "Your team +{n}": "Tu equipo +{n}",
-    "{team} is {rank}": "{team} va {rank}",
+    "{team} is {rank}": "El equipo {team} va {rank}",
     "{n} people are in. Tap a name to move it to another team or remove it.": "Hay {n} personas. Tocá un nombre para pasarlo a otro equipo o sacarlo.",
     "Teams": "Equipos",
     "Play in teams": "Jugar en equipos",
@@ -294,7 +300,7 @@ const DICT = {
     "Mix the order of the answers on each phone": "Mezclar el orden de las respuestas en cada celular",
     "Pictures stay on this device: phones get the words only.": "Las imágenes quedan en este dispositivo: los celulares reciben solo el texto.",
     "Question {n}: an answer that is only a picture needs words to be assigned": "Pregunta {n}: una respuesta que es solo una imagen necesita texto para asignarla",
-    "Create assignment": "Crear la asignación",
+    "Create assignment": "Crear la tarea",
     "Cancel": "Cancelar",
     "Pick a time within the next {n} days": "Elegí una hora dentro de los próximos {n} días",
     "Open until {when}": "Abierta hasta el {when}",
@@ -308,7 +314,7 @@ const DICT = {
     "Link copied": "Enlace copiado",
     "Send the link, or people enter the code at {site}": "Mandá el enlace, o que pongan el código en {site}",
     "Loading…": "Cargando…",
-    "This assignment isn't there any more.": "Esta asignación ya no está.",
+    "This assignment isn't there any more.": "Esta tarea ya no está.",
     "People: {n} · {d} finished": "Personas: {n} · {d} terminaron",
     "Nobody yet. Send the link or the code.": "Nadie todavía. Mandá el enlace o el código.",
     "Progress": "Avance",
@@ -391,7 +397,7 @@ export function translatePage(root = document) {
     const core = s.replace(/\s*·\s*$/, "");
     if (table[core]) n.nodeValue = raw.replace(core, table[core]);
   }
-  for (const el of (root.body || root).querySelectorAll("[title],[placeholder]")) {
-    for (const a of ["title", "placeholder"]) if (el.hasAttribute(a)) el.setAttribute(a, t(el.getAttribute(a)));
+  for (const el of (root.body || root).querySelectorAll("[title],[placeholder],[aria-label]")) {
+    for (const a of ["title", "placeholder", "aria-label"]) if (el.hasAttribute(a)) el.setAttribute(a, t(el.getAttribute(a)));
   }
 }

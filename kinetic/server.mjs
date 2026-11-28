@@ -156,6 +156,9 @@ if (!resumeKey) console.log("no resume key: games can't move here from the other
 const joins = new Map();
 const JOIN_LIMIT = Number(process.env.JOIN_LIMIT) || 600; // the Worker's JOINS (wrangler.toml: a hall of 500, audit R2-7)
 setInterval(() => joins.clear(), 60000).unref();
+const peeks = new Map(); // the Worker's PEEKS (wrangler.toml)
+const PEEK_LIMIT = Number(process.env.PEEK_LIMIT) || 600;
+setInterval(() => peeks.clear(), 60000).unref();
 const ENV = {
   RESUME_KEY: resumeKey,
   JOINS: { limit: async ({ key }) => { const n = (joins.get(key) || 0) + 1; joins.set(key, n); return { success: n <= JOIN_LIMIT }; } },
@@ -237,6 +240,20 @@ const server = http.createServer(async (req, res) => {
     const r = await newRoom(ENV);
     res.writeHead(r.status, { "content-type": "application/json", ...cors });
     return res.end(await r.text());
+  }
+  // the code screen's "is this code in use?" (U-R6), like the Worker's: counted per address (PEEK_LIMIT), a miss
+  // also counts as a failed lookup (JOINS); a code with nothing in memory or on disk is answered without opening it
+  const pk = path.match(/^\/api\/room\/(\d{6})$/);
+  if (pk && req.method === "GET") {
+    const ip = await ipKey(String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "?").split(",")[0].trim(), resumeKey);
+    const n = (peeks.get(ip) || 0) + 1;
+    peeks.set(ip, n);
+    let t;
+    if (n > PEEK_LIMIT) t = "slow";
+    else if (!rooms.has(pk[1]) && !existsSync(fileOf(pk[1]))) t = (await ENV.JOINS.limit({ key: ip })).success ? "gone" : "slow";
+    else t = (await (await ENV.ROOMS.get(pk[1]).fetch("https://room/peek", { method: "POST", body: ip })).json()).t;
+    res.writeHead(200, { "content-type": "application/json", ...cors });
+    return res.end(JSON.stringify({ t }));
   }
   const m = path.match(/^\/ws\/(\d{6})$/);
   res.writeHead(m ? 426 : 404, { "content-type": "text/plain", ...cors });

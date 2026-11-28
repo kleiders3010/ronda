@@ -177,6 +177,19 @@ export default {
       if (!ok) return Response.json({ error: "slow" }, { status: 429, headers: CORS });
     }
     if (url.pathname === "/api/new" && req.method === "POST") return newRoom(env);
+    // the code screen asks whether a code is in use before the name step (UX review U-R6). Counted per address
+    // (wrangler.toml PEEKS) before the room wakes; a miss also counts as a failed lookup inside the room (JOINS), so
+    // codes can't be tried faster than by joining. No PEEKS: "unknown", and the page goes on as before.
+    const pk = url.pathname.match(/^\/api\/room\/(\d{6})$/);
+    if (pk && req.method === "GET") {
+      if (!env.PEEKS) return Response.json({ t: "unknown" }, { headers: CORS });
+      const ipk = await ipKey(req.headers.get("CF-Connecting-IP"), env.RESUME_KEY);
+      let ok = false;
+      try { ok = (await env.PEEKS.limit({ key: ipk })).success; } catch (_) {}
+      if (!ok) return Response.json({ t: "slow" }, { headers: CORS });
+      const r = await env.ROOMS.get(env.ROOMS.idFromName(pk[1])).fetch("https://room/peek", { method: "POST", body: ipk });
+      return Response.json(await r.json(), { headers: CORS });
+    }
     if (m) {
       if (req.headers.get("Upgrade") !== "websocket") return new Response("expected a websocket", { status: 426 });
       const h = new Headers(req.headers);
@@ -525,6 +538,16 @@ export class Room {
       await this.save(true);
       await this.plan();
       return new Response("ok");
+    }
+    // is this code in use (U-R6)? An assignment answers like a code nobody uses: its link opens it, not the code
+    if (url.pathname === "/peek") {
+      const g = await this.game();
+      let t;
+      if (!g || g.self || Date.now() >= expiry(g)) t = (await lookupOk(this.env, { __ip: await req.text() })) ? "gone" : "slow";
+      else if (g.phase === "end") t = "over";
+      else if (g.locked) t = "locked";
+      else t = "here";
+      return Response.json({ t });
     }
     if (this.state.getWebSockets().length >= MAX_SOCKETS) return new Response("full", { status: 429 });
     const pair = new WebSocketPair();

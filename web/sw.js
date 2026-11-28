@@ -1,7 +1,7 @@
 // The page shown with no connection (Juntos UX review U-J14, ported: the Android app showed Chrome's error page).
 // Pages and files still come fresh from the server every time (network first); only when the network fails is the
 // small offline page shown. Nothing else is cached.
-const CACHE = "ronda-offline-2"; // 2: the offline page says it opens by itself (U-R22, 2026-11-28)
+const CACHE = "ronda-offline-3"; // 2: the offline page says it opens by itself (U-R22, 2026-11-28); 3: rem sizes (U-R10)
 const OFFLINE = new URL("offline", self.registration.scope).href;
 const FILES = ["offline", "offline.js", "i18n.js", "feedback.js", "style.css", "img/icon-192.png"].map((f) => new URL(f, self.registration.scope).href);
 
