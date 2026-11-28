@@ -1881,8 +1881,9 @@ function saveQuestions(title) {
   const status = { "": "", wait: t("Waiting for the host"), hi: t("On the screen now"), done: t("Answered") };
   const rows = [[t("Question"), t("Asked by"), t("Votes"), t("Status")],
     ...qaSorted(qa.list).map((x) => [x.text, x.name || t("Anonymous"), qaVotes(x), status[x.st]])];
-  const csv = "\ufeff" + rows.map((r) => r.map(csvCell).join(",")).join("\r\n");
-  downloadFile((title || "Ronda") + " - " + t("questions") + ".csv", csv, "text/csv");
+  const csv = "\ufeff" + rows.map((r) => r.map(csvCell).join(csvSep())).join("\r\n");
+  const day = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10); // rule 220
+  downloadFile((title || "Ronda") + " - " + t("questions") + " " + day + ".csv", csv, "text/csv");
   toast(t("Questions saved to your downloads"));
 }
 
@@ -2299,6 +2300,8 @@ function csvCell(v) {
   if (typeof v !== "number" && /^[=+\-@]/.test(s.replace(/^[\s\x00-\x1f]+/, ""))) s = "'" + s;
   return /[",\r\n;]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
+// a spreadsheet set to a language that writes 1,5 splits on ";" (APP-RULES 247, from Sumate U-S17)
+const csvSep = () => ((1.5).toLocaleString(LANG).includes(",") ? ";" : ",");
 
 function saveResults(m) {
   const qs = m.quiz.questions;
@@ -2321,7 +2324,7 @@ function saveResults(m) {
     rows.push([], [t("Team"), t("Team points")]);
     tm.names.map((name, k) => [name, tm.score[k]]).sort((a, b) => b[1] - a[1]).forEach((r) => rows.push(r));
   }
-  const csv = "﻿" + rows.map((r) => r.map(esc).join(",")).join("\r\n");
+  const csv = "﻿" + rows.map((r) => r.map(esc).join(csvSep())).join("\r\n");
   // the date in the name: the same ronda run with two groups gives two files, not "results (1)" (rule 220, U-R21)
   const d = new Date(), z = (n) => String(n).padStart(2, "0");
   const when = d.getFullYear() + "-" + z(d.getMonth() + 1) + "-" + z(d.getDate()) + " " + z(d.getHours()) + "." + z(d.getMinutes());
