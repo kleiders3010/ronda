@@ -81,6 +81,14 @@ with sync_playwright() as p:
     check(back, "the host is back: the line goes")
 
     # 2. the heartbeat: the link goes silent without closing; the phone finds out and opens a new one
+    # a phone too busy to read its messages for a while keeps a healthy link (the answer came, it just wasn't read yet)
+    calm = links["n"]
+    for _ in range(4):
+        pl.evaluate("() => { const end = Date.now() + 2500; while (Date.now() < end); }")
+        pl.wait_for_timeout(300)
+    pl.wait_for_timeout(2500)
+    check(links["n"] == calm, f"a busy phone keeps its healthy link ({calm} -> {links['n']} links)")
+
     before = links["n"]
     links["silent"] = True
     for _ in range(40):  # up to 10 s: at ?beat=0.1 a ping every 2 s, its answer awaited 0.8 s
