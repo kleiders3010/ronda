@@ -14,9 +14,9 @@ const DICT = {
     "Join": "Entrar",
     "Make a quiz or poll": "Crear una trivia o encuesta",
     "Your rondas": "Tus rondas",
-    "Free, no account, no player limit": "Gratis, sin cuenta, sin límite de jugadores",
+    "Free, no account, up to 500 players": "Gratis, sin cuenta, hasta 500 jugadores",
     "Open source": "Código abierto",
-    "Free, no account, no player limit · Open source": "Gratis, sin cuenta, sin límite de jugadores · Código abierto",
+    "Free, no account, up to 500 players · Open source": "Gratis, sin cuenta, hasta 500 jugadores · Código abierto",
     "Privacy": "Privacidad",
     "Your name": "Tu nombre",
     "Go": "Listo",
@@ -244,6 +244,28 @@ const DICT = {
     "{n} people": "{n} personas",
     "{n} points": "{n} puntos",
     "{n} questions": "{n} preguntas",
+    // one-forms (ONE below, UX review U-R7)
+    "{n} question": "{n} pregunta",
+    "{n} point": "{n} punto",
+    "{n} person": "{n} persona",
+    "{n} vote": "{n} voto",
+    "Vote for this question ({n} vote)": "Votar esta pregunta ({n} voto)",
+    "{n} picture couldn't be kept": "No se pudo guardar {n} imagen",
+    "Remove the one who joined in the last minute?": "¿Sacar a quien entró en el último minuto?",
+    "{n} person is in. Tap the name to remove it.": "Hay {n} persona. Tocá el nombre para sacarla.",
+    "{n} person is in. Tap the name to move it to another team or remove it.": "Hay {n} persona. Tocá el nombre para pasarla a otro equipo o sacarla.",
+    // the live link (U-R1), Close (U-R3)
+    "Reconnecting…": "Reconectando…",
+    "Can't reach Ronda. Check the internet.": "No se puede llegar a Ronda. Revisá la conexión a internet.",
+    "Close anyway": "Cerrar igual",
+    // leaving a running game (U-R2)
+    "Leave the ronda? The players stay waiting.": "¿Salir de la ronda? La gente se queda esperando.",
+    "Leave the ronda? You can come back with the same code.": "¿Salir de la ronda? Podés volver con el mismo código.",
+    "Stay": "Quedarme",
+    "Leave": "Salir",
+    "Running now": "En curso",
+    "Back to it": "Volver",
+    "Close without the results? They are deleted with the room.": "¿Cerrar sin los resultados? Se borran con la sala.",
     "{s} s": "{s} s",
     // teams
     "Foxes": "Zorros", "Owls": "Búhos", "Bears": "Osos", "Wolves": "Lobos", "Otters": "Nutrias",
@@ -306,6 +328,8 @@ const DICT = {
     "The time to answer is over": "Se terminó el tiempo para responder",
     "{r} of {n} right · {p} points": "{r} de {n} bien · {p} puntos",
     "No connection. Ronda needs the internet to play.": "Sin conexión. Ronda necesita internet para jugar.",
+    "It opens by itself when the connection is back.": "Se abre sola cuando vuelve la conexión.",
+    "Quizzes and polls you make are kept here, on this device.": "Las preguntas y encuestas que hagas quedan acá, en este dispositivo.",
     "Try again": "Reintentar",
   },
 };
@@ -331,8 +355,23 @@ function safeGet(k) {
 export const LANG = pick();
 const table = LANG !== "en" && Object.hasOwn(DICT, LANG) ? DICT[LANG] : {};
 
+// The one-form of a counted text (UX review U-R7, rule 217: "1 questions" / "1 personas"): t() picks it when n is 1,
+// so every caller is right without knowing. worker/plural_test.mjs fails a "{n} <plural>" text missing here.
+export const ONE = {
+  "{n} questions": "{n} question",
+  "{n} points": "{n} point",
+  "{n} people": "{n} person",
+  "{n} votes": "{n} vote",
+  "Vote for this question ({n} votes)": "Vote for this question ({n} vote)",
+  "{n} pictures couldn't be kept": "{n} picture couldn't be kept",
+  "Remove the {n} who joined in the last minute?": "Remove the one who joined in the last minute?",
+  "{n} people are in. Tap a name to remove it.": "{n} person is in. Tap the name to remove it.",
+  "{n} people are in. Tap a name to move it to another team or remove it.": "{n} person is in. Tap the name to move it to another team or remove it.",
+};
+
 /** t("{name} left", { name }) -> the text in the UI language, placeholders filled. */
 export function t(text, vars) {
+  if (vars && vars.n !== "" && Number(vars.n) === 1 && Object.hasOwn(ONE, text)) text = ONE[text];
   let s = table[text] ?? text;
   if (vars) for (const [k, v] of Object.entries(vars)) s = s.split(`{${k}}`).join(String(v));
   return s;

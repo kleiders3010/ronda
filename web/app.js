@@ -97,7 +97,11 @@ function go(path, replace = false) {
   history[replace ? "replaceState" : "pushState"](null, "", BASE + path.slice(1) + location.search);
   route();
 }
-window.addEventListener("popstate", route);
+// a player who opened the game's link has nothing behind it: playScreen adds one entry, and Back on it asks (U-R2)
+window.addEventListener("popstate", () => {
+  if (live?.guard?.() && here() === live.path) return askLeave("/");
+  route();
+});
 document.addEventListener("click", (e) => {
   if (e.target.closest("[data-home]")) { e.preventDefault(); go("/"); }
 });
@@ -107,8 +111,51 @@ function closeLive() {
   if (live) { live.stop(); live = null; }
 }
 
+// The rooms this tab is hosting and that haven't ended: the home list offers "Back to it" (UX review U-R2).
+function runningRooms() {
+  const out = [];
+  try {
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i);
+      const m = k && k.match(/^ronda\.host:(\d{6})$/);
+      if (!m) continue;
+      const v = JSON.parse(sessionStorage.getItem(k) || "null");
+      if (v && v.snap?.phase !== "end") out.push(m[1]);
+    }
+  } catch {}
+  return out;
+}
+
+// Back (or a link) during a running game asks once (UX review U-R2: the host's Back left the room running with
+// nobody driving it; a player's Back left the game in one press). live.guard() says whether a game is on.
+let leaving = "";
+function askLeave(to) {
+  const from = live.path;
+  history.pushState(null, "", BASE + from.slice(1) + location.search);
+  document.getElementById("leaveAsk")?.remove();
+  const box = el("div", "leaveAsk");
+  box.id = "leaveAsk";
+  box.setAttribute("role", "alertdialog");
+  const msg = el("p", "", live.host ? t("Leave the ronda? The players stay waiting.") : t("Leave the ronda? You can come back with the same code."));
+  msg.id = "leaveAskMsg";
+  box.setAttribute("aria-labelledby", "leaveAskMsg");
+  const stay = el("button", "btn primary", t("Stay"));
+  stay.onclick = () => box.remove();
+  const go2 = el("button", "btn ghost", t("Leave"));
+  go2.onclick = () => { box.remove(); leaving = to; go(to); };
+  box.append(msg, stay, go2);
+  document.body.append(box);
+  stay.focus();
+}
+addEventListener("beforeunload", (e) => {
+  if (live?.guard?.()) { e.preventDefault(); e.returnValue = ""; }
+});
+
 function route() {
   const p = here();
+  if (live?.path && p !== live.path && leaving !== p && live.guard?.()) return askLeave(p);
+  leaving = "";
+  document.getElementById("leaveAsk")?.remove();
   closeLive();
   let m;
   if ((m = p.match(/^\/(\d{6})$/))) return nameScreen(m[1]);
@@ -333,10 +380,22 @@ function homeScreen() {
     const open = el("button", "mineOpen");
     open.append(el("b", "", q.title || t("Untitled")), el("span", "small", t("{n} questions", { n: q.questions.length })));
     open.onclick = () => go("/edit/" + q.id);
-    const play = el("button", "btn primary", t("Start"));
+    const play = el("button", "btn primary startQuiz", t("Start"));
     play.onclick = () => startHosting(q);
     li.append(open, play);
     ul.append(li);
+  }
+  // a first-time host: what goes in this list (UX review U-R19)
+  if (!list.length) ul.append(el("li", "small", t("Quizzes and polls you make are kept here, on this device.")));
+  // a room this tab is still hosting can be found again (UX review U-R2: Back left it running with no way back)
+  for (const code of runningRooms()) {
+    const li = el("li", "mineRow running");
+    const info = el("span", "mineOpen");
+    info.append(el("b", "", t("Running now")), el("span", "small", fmtCode(code)));
+    const back = el("button", "btn primary", t("Back to it"));
+    back.onclick = () => go("/host/" + code);
+    li.append(info, back);
+    ul.prepend(li);
   }
   const fileRow = el("li", "mineFile");
   const fb = el("button", "btn link", t("Open a file…"));
@@ -614,8 +673,10 @@ function ptsTag(pts) {
 }
 
 function problems(q) {
+  problems.at = -1;
   if (!q.questions.length) return t("Add a question first");
   for (const [i, x] of q.questions.entries()) {
+    problems.at = i; // which card the message is about (showProblem, U-R5)
     if (!x.text.trim()) return t("Question {n} has no text", { n: i + 1 });
     if (x.answers && x.answers.filter((a, j) => a.trim() || x.aimg?.[j]).length < 2) return t("Question {n} needs at least 2 answers", { n: i + 1 });
     if (x.kind === "slider") {
@@ -626,7 +687,31 @@ function problems(q) {
     if (x.kind === "type" && !x.accept.some((a) => norm(a))) return t("Question {n} needs the right answer", { n: i + 1 });
     if (x.kind === "quiz" && !x.correct.some((j) => x.answers[j]?.trim() || x.aimg?.[j])) return t("Question {n}: tap ✓ on the right answer", { n: i + 1 });
   }
+  problems.at = -1;
   return null;
+}
+
+// A blocked Start explains itself at the cause (UX review U-R5: the reason was written under the last card, off
+// screen): the card is marked and scrolled into view, its first empty field gets the focus, the message shows there
+// and in a toast.
+function showProblem(msg) {
+  const at = problems.at;
+  $("#editMsg").textContent = msg;
+  $("#editMsg").hidden = false;
+  toast(msg, 6000);
+  setTimeout(() => {
+    for (const c of document.querySelectorAll(".qcard.bad")) c.classList.remove("bad");
+    for (const n of document.querySelectorAll(".qcard .qmsg")) n.remove();
+    const card = at >= 0 ? document.querySelectorAll(".qcard")[at] : null;
+    if (!card) return $("#editMsg").scrollIntoView({ block: "center" });
+    card.classList.add("bad");
+    const note = el("p", "qmsg", msg);
+    note.setAttribute("role", "alert");
+    card.append(note);
+    card.scrollIntoView({ block: "center" });
+    const empty = [...card.querySelectorAll("textarea, input:not([type=checkbox]):not([type=file])")].find((x) => !x.value.trim());
+    (empty || card.querySelector("textarea, input"))?.focus({ preventScroll: true });
+  }, 80);
 }
 
 $("#startBtn").onclick = () => {
@@ -752,11 +837,20 @@ async function startHosting(q) {
   const msg = problems(q);
   if (msg) {
     if (here() !== "/edit/" + q.id) go("/edit/" + q.id);
-    $("#editMsg").textContent = msg;
-    $("#editMsg").hidden = false;
+    showProblem(msg);
     return;
   }
-  const room = await makeRoom();
+  // up to 12 s on two servers: said at once, and a second tap doesn't make a second room (UX review U-R13)
+  if (startHosting.busy) return;
+  startHosting.busy = true;
+  const btns = [...document.querySelectorAll("#startBtn, .startQuiz")];
+  for (const b of btns) b.disabled = true;
+  toast(t("Opening the room…"));
+  let room;
+  try { room = await makeRoom(); } finally {
+    startHosting.busy = false;
+    for (const b of btns) b.disabled = false;
+  }
   if (!room) return toast(t("Couldn't start. Check the internet and try again."));
   const { code, token, at } = room;
   const questions = bare(q.questions).map((x, i) => {
@@ -831,13 +925,64 @@ const sideOf = (code) => [...code].reduce((a, d) => a + Number(d), 0) % 2;
 const homeOf = (code) => (SERVERS[1] && sideOf(code) ? 1 : 0);
 const otherOf = (at) => (SERVERS[1 - at] ? 1 - at : at);
 const LIVE = { opens: 0, drops: 0, moves: 0 }; // for "Send feedback": how often the live link dropped
+// The link's state on every live screen (UX review U-R1, 2026-11-28: a dropped link was silent and a tap made while
+// it was down was lost): "Reconnecting…" after a second without the link, and a worded error with Try again when the
+// first link doesn't come in 15 s. Taps made while it is down wait in `queue` and go once it is back.
+function netBar() {
+  let bar = document.getElementById("net");
+  if (!bar) {
+    bar = el("div", "net");
+    bar.id = "net";
+    bar.setAttribute("role", "status");
+    bar.hidden = true;
+    document.body.append(bar);
+  }
+  return bar;
+}
+function netShow(text, retry) {
+  const bar = netBar();
+  if (!text) { bar.hidden = true; bar.replaceChildren(); return; }
+  bar.replaceChildren(el("span", "", text));
+  if (retry) {
+    const b = el("button", "btn chip", t("Try again"));
+    b.type = "button";
+    b.onclick = retry;
+    bar.append(b);
+  }
+  bar.hidden = false;
+}
 function connect(code, onOpen, onMsg, { at = homeOf(code), patience = 2 } = {}) {
-  let ws, stopped = false, wait = 500, fails = 0;
+  let ws, stopped = false, wait = 500, fails = 0, ever = false, downTimer = 0, retryTimer = 0;
+  const queue = []; // [time, message]: sent when the link is back; older than 60 s is dropped
+  const down = () => {
+    if (stopped || downTimer) return;
+    downTimer = setTimeout(() => {
+      downTimer = 0;
+      if (stopped || ws?.readyState === 1) return;
+      if (ever) netShow(t("Reconnecting…"));
+    }, 1000);
+  };
+  const firstWait = setTimeout(() => {
+    if (!ever && !stopped) netShow(t("Can't reach Ronda. Check the internet."), () => { netShow(t("Reconnecting…")); retryNow(); });
+  }, 15000);
+  const retryNow = () => {
+    if (stopped) return;
+    clearTimeout(retryTimer);
+    wait = 500;
+    if (!ws || ws.readyState > 1) open();
+  };
   const open = () => {
     let opened = false;
     const sock = (ws = new WebSocket(SERVERS[at] + "/ws/" + code));
     const timer = setTimeout(() => { if (!opened) sock.close(); }, 5000);
-    sock.onopen = () => { opened = true; clearTimeout(timer); wait = 500; fails = 0; LIVE.opens++; onOpen(at); };
+    sock.onopen = () => {
+      opened = ever = true; clearTimeout(timer); clearTimeout(firstWait); clearTimeout(downTimer); downTimer = 0;
+      wait = 500; fails = 0; LIVE.opens++;
+      netShow("");
+      onOpen(at);
+      const now = Date.now();
+      for (const [when, m] of queue.splice(0)) if (now - when < 60000) sock.send(JSON.stringify(m));
+    };
     sock.onmessage = (e) => { if (sock === ws) try { onMsg(JSON.parse(e.data), at); } catch {} };
     sock.onclose = () => {
       clearTimeout(timer);
@@ -845,14 +990,29 @@ function connect(code, onOpen, onMsg, { at = homeOf(code), patience = 2 } = {}) 
       LIVE.drops++;
       // a server that doesn't answer a few times in a row: the other one
       if (!opened && ++fails >= patience && otherOf(at) !== at) { at = otherOf(at); fails = 0; LIVE.moves++; }
-      setTimeout(open, wait);
+      down();
+      retryTimer = setTimeout(open, wait);
       wait = Math.min(wait * 2, 4000);
     };
   };
   open();
+  // back online or back on screen: try at once instead of waiting out the back-off
+  const wake = () => { if (document.visibilityState !== "hidden") retryNow(); };
+  addEventListener("online", wake);
+  document.addEventListener("visibilitychange", wake);
   return {
-    send: (m) => { if (ws.readyState === 1) ws.send(JSON.stringify(m)); },
-    stop: () => { stopped = true; try { ws.close(); } catch {} },
+    send: (m) => {
+      if (ws?.readyState === 1) ws.send(JSON.stringify(m));
+      else if (!stopped) { queue.push([Date.now(), m]); if (queue.length > 50) queue.shift(); down(); }
+    },
+    stop: () => {
+      stopped = true;
+      clearTimeout(firstWait); clearTimeout(downTimer); clearTimeout(retryTimer);
+      removeEventListener("online", wake);
+      document.removeEventListener("visibilitychange", wake);
+      netShow("");
+      try { ws.close(); } catch {}
+    },
     get at() { return at; },
     move: (to) => {
       const old = ws;
@@ -950,7 +1110,8 @@ function playScreen(code, name, key = "") {
   let lastKey = "";
   const gone = new Set(); // servers that said they don't have this ronda
   let seen = false; // a view came: "gone" now means it ended, not "no such code"
-  live = connect(code, () => live.send({ t: "join", id: pidFor(code), name, k: key }), (m, at) => {
+  // every (re)open redraws: a tap greyed while the link was down shows again as the server has it (U-R1)
+  live = connect(code, () => { lastKey = ""; live.send({ t: "join", id: pidFor(code), name, k: key }); }, (m, at) => {
     if (m.t === "moved" && otherOf(at) !== at) return live.move(otherOf(at));
     if (m.t === "gone" && otherOf(at) !== at && !gone.has(otherOf(at))) {
       gone.add(at);
@@ -968,6 +1129,7 @@ function playScreen(code, name, key = "") {
     if (m.t === "qa-full") return toast(t("No more questions can be asked here"));
     if (m.t === "qa-closed") return toast(t("The host closed questions for now"));
     if (m.t !== "view") return;
+    live.onView?.(m);
     $("#pName").textContent = m.name;
     $("#pScore").textContent = m.score || (m.phase !== "lobby" && m.phase !== "question" && scored(m.kind)) ? t("{n} points", { n: m.score || 0 }) : "";
     $("#pTeam").replaceChildren(...(m.team ? [teamDot(m.team.k), m.team.name] : []));
@@ -989,6 +1151,12 @@ function playScreen(code, name, key = "") {
       }, m.readIn - 300);
     } else main.classList.remove("talking");
   });
+  // Back during the game asks once (U-R2); at the end it just goes
+  let phase = "";
+  live.onView = (m) => { phase = m.phase; };
+  live.path = "/" + code;
+  live.guard = () => !!phase && phase !== "end";
+  history.pushState(null, "", location.href);
   function endMsg(text) {
     closeLive();
     $("#pQa").hidden = $("#pQaBox").hidden = true;
@@ -1348,6 +1516,7 @@ function hostScreen(code) {
   if (!saved) { toast(t("This screen isn't hosting that ronda")); return go("/", true); }
   show("host");
   keepAwake();
+  saveResults.done = false; // a new room: its results aren't downloaded yet (U-R3)
   hostPics = saved.pics || [];
   // pictures are drawn without waiting (results redraw often): load them all first, then redraw once
   Promise.all(hostPics.flatMap((x) => [x?.q, ...(x?.a || [])]).filter(isPic).map(async (k) => hostUrls.set(k, await getPic(k))))
@@ -1388,10 +1557,10 @@ function hostScreen(code) {
     if (m.t === "savefail" && otherOf(at) !== at && !live.saveMoved) { live.saveMoved = true; saved.at = otherOf(at); keep(); return live.move(otherOf(at)); }
     // the other server would not take the game (no proof it is ours): never lose it, wait for its own server
     if (m.t === "denied" && at !== homeOf(code)) { saved.at = homeOf(code); keep(); return live.move(homeOf(code)); }
-    if (m.t === "denied" || m.t === "gone") { toast(t("This ronda has ended")); sessionStorage.removeItem(hostKey(code)); return go("/", true); }
-    if (m.t === "bad-quiz") { toast(t("Something in this ronda can't be used")); return go("/", true); }
+    if (m.t === "denied" || m.t === "gone") { toast(t("This ronda has ended")); sessionStorage.removeItem(hostKey(code)); return closeLive(), go("/", true); }
+    if (m.t === "bad-quiz") { toast(t("Something in this ronda can't be used")); return closeLive(), go("/", true); }
     if (m.t === "export") return Date.now() - askedExport < 30000 && ((askedExport = 0), saveResults(m));
-    if (m.t === "closed") { sessionStorage.removeItem(hostKey(code)); return go("/", true); }
+    if (m.t === "closed") { sessionStorage.removeItem(hostKey(code)); return closeLive(), go("/", true); }
     if (m.t === "qa") {
       snap.qa = { open: m.open, mod: m.mod, list: m.list };
       keep();
@@ -1411,6 +1580,9 @@ function hostScreen(code) {
     lastKey = key;
   }, { at: first, patience: 3 });
   live.host = true;
+  // Back while people are in and the game isn't over asks once (U-R2)
+  live.path = "/host/" + code;
+  live.guard = () => !!st && st.phase !== "end" && (st.players?.length || 0) > 0;
   let askedExport = 0;
   $("#hNext").onclick = () => {
     if (!st) return;
@@ -1605,8 +1777,20 @@ function renderHost(code, m, fresh) {
       });
       wrap.append(pod);
     } else wrap.append(el("p", "thanks", t("Thanks, everyone!")));
+    // closing deletes the room and its results: asked once while they weren't downloaded (UX review U-R3)
     const close = el("button", "btn ghost", t("Close the room"));
-    close.onclick = () => live.send({ t: "close" });
+    close.onclick = () => {
+      if (saveResults.done) return live.send({ t: "close" });
+      const ask = el("div", "closeAsk");
+      ask.setAttribute("role", "group");
+      const dl = el("button", "btn primary", t("Download results"));
+      dl.onclick = () => $("#hNext").click();
+      const anyway = el("button", "btn ghost", t("Close anyway"));
+      anyway.onclick = () => live.send({ t: "close" });
+      ask.append(el("p", "", t("Close without the results? They are deleted with the room.")), dl, anyway);
+      close.replaceWith(ask);
+      dl.focus();
+    };
     wrap.append(close);
     main.replaceChildren(wrap);
     return;
@@ -1924,7 +2108,11 @@ function saveResults(m) {
     tm.names.map((name, k) => [name, tm.score[k]]).sort((a, b) => b[1] - a[1]).forEach((r) => rows.push(r));
   }
   const csv = "﻿" + rows.map((r) => r.map(esc).join(",")).join("\r\n");
-  downloadFile((m.quiz.title || "Ronda") + " - " + t("results") + ".csv", csv, "text/csv");
+  // the date in the name: the same ronda run with two groups gives two files, not "results (1)" (rule 220, U-R21)
+  const d = new Date(), z = (n) => String(n).padStart(2, "0");
+  const when = d.getFullYear() + "-" + z(d.getMonth() + 1) + "-" + z(d.getDate()) + " " + z(d.getHours()) + "." + z(d.getMinutes());
+  downloadFile((m.quiz.title || "Ronda") + " - " + t("results") + " " + when + ".csv", csv, "text/csv");
+  saveResults.done = true;
   toast(t("Results saved to your downloads"));
 }
 
@@ -1950,11 +2138,10 @@ const toLocalInput = (ms) => new Date(ms - new Date(ms).getTimezoneOffset() * 60
 
 function openAssign(q) {
   const picOnly = q.questions.findIndex((x) => x.answers && x.aimg?.some((k, j) => k && !x.answers[j]?.trim()));
-  const msg = problems(q) || (picOnly >= 0 ? t("Question {n}: an answer that is only a picture needs words to be assigned", { n: picOnly + 1 }) : null);
+  const msg = problems(q) || (picOnly >= 0 ? ((problems.at = picOnly), t("Question {n}: an answer that is only a picture needs words to be assigned", { n: picOnly + 1 })) : null);
   if (msg) {
     if (here() !== "/edit/" + q.id) go("/edit/" + q.id);
-    $("#editMsg").textContent = msg;
-    $("#editMsg").hidden = false;
+    showProblem(msg);
     return;
   }
   const sheet = el("div", "asgSheet");

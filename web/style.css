@@ -210,8 +210,12 @@ a { color: var(--accent); }
 @media (max-width: 640px) {
   .hAnswers, .hAnswers.n2, .hAnswers.n5, .hAnswers.n6 { grid-template-columns: 1fr; }
   #hFull { display: none; }
-  .hfoot { gap: 8px; padding: 10px 12px; }
+  .hfoot { gap: 8px; padding: 10px 12px; flex-wrap: wrap; }
   .hfoot .btn.big { padding: 12px 20px; font-size: 18px; }
+  /* 360 dp: the info line on top, the side buttons, the main button on its own full row (UX review U-R4) */
+  .hfoot #hInfo { flex-basis: 100%; }
+  .hfoot .grow { display: none; }
+  .hfoot #hNext { flex-basis: 100%; }
 }
 
 /* audience questions */
@@ -387,3 +391,17 @@ div.typed .chip.ok { outline: 2px solid #86efac; }
 /* the page shown with no connection (sw.js) */
 .offlinePage { max-width: 420px; margin: 18vh auto 0; padding: 24px; text-align: center; display: grid; gap: 14px; justify-items: center; }
 .offlinePage h1 { margin: 0; }
+
+/* the live link's state (UX review U-R1) */
+.net { position: fixed; left: 50%; top: max(8px, env(safe-area-inset-top)); transform: translateX(-50%); z-index: 50; display: flex; gap: 10px; align-items: center; max-width: calc(100% - 24px); padding: 8px 10px 8px 16px; border-radius: 12px; background: #fef3c7; color: #422006; font-weight: 700; box-shadow: 0 2px 12px rgba(0, 0, 0, .25); }
+.net[hidden] { display: none; }
+.net .btn.chip { min-height: 44px; }
+/* a question Start is blocked on (UX review U-R5) */
+.qcard.bad { outline: 3px solid var(--c3); outline-offset: 2px; }
+.qcard .qmsg { margin: 0; color: #9f1239; font-weight: 700; }
+.closeAsk { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: center; }
+.closeAsk p { flex-basis: 100%; text-align: center; margin: 0; }
+/* Back during a game asks once (UX review U-R2) */
+.leaveAsk { position: fixed; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 60; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: center; width: min(460px, calc(100% - 24px)); padding: 14px; border-radius: var(--radius); background: var(--card); color: var(--ink); box-shadow: 0 6px 28px rgba(0, 0, 0, .35); }
+.leaveAsk p { flex-basis: 100%; margin: 0; text-align: center; font-weight: 700; }
+.mineRow.running { outline: 2px solid var(--accent); }
